@@ -1,10 +1,43 @@
 import nengo
+import nengo.connection
+import nengo.network
 import numpy as np
 import simulation
 
 arena = simulation.Arena()
 last_action: simulation.Direction = None
 
+#this is currently taken from a basal ganglia tutorial
+class ActionIterator:
+    def __init__(self, dimensions):
+        self.actions = np.ones(dimensions) * 0.1
+
+    def direction_select(self, t):
+        # one action at time dominates
+        dominate = int(t % 4) # one action dominates on each step with 4 steps
+        self.actions[:] = 0.1
+        self.actions[dominate] = 0.8    
+        return self.actions
+
+action_iterator = ActionIterator(dimensions = 4) 
+
+def move(t, x, wrld = curr_wrld): #wrld is the current location
+    
+
+#parameters for learning
+learn_rate = 1e-4
+learn_synapse = 0.030
+pac_bais = [0.9,0.8,0.7,0.6] #placeholder numbers rn
+pac_threshold = 0.1 #min reach to do somthing
+pac_dim = 5 # dimensions of networks
+
+
+bg = nengo.networks.actionselection.BasalGanglia(4)
+thal = nengo.networks.actionselection.Thalamus(4)
+nengo.Connection(bg.output, thal.input)
+
+nengo.Connection(thal.output(0), movement)
+nengo.connection()
 def pacman_output(time: float):
     VAL_MAX = 20
     detect = arena.detection()
@@ -14,13 +47,13 @@ def pacman_output(time: float):
 def results(time: float, data: np.ndarray):
     if time % 0.1 == 0:
         max_index = np.argmax(np.abs(data))
-        #if abs(data[max_index]) > 0.8:
-        dir = simulation.Direction(max_index)
-        last_action = dir
-        print(f"Direction: {dir.name}")
-        arena.move(dir)
-        print(f"Player position: ({arena.player.x}, {arena.player.y})")
-        print(f"Goal position: ({arena.goal.x}, {arena.goal.y})")
+        if abs(data[max_index]) > 0.8:
+            dir = simulation.Direction(max_index)
+            last_action = dir
+            print(f"Direction: {dir.name}")
+            arena.move(dir)
+            print(f"Player position: ({arena.player.x}, {arena.player.y})")
+            print(f"Goal position: ({arena.goal.x}, {arena.goal.y})")
 
 def err(data: np.ndarray):
     y_up_delta = (1 if arena.player.y - arena.goal.y < 0 else 0) - (1 if last_action == simulation.Direction.UP and arena.grid[arena.player.y - 1][arena.player.x] == arena.WALL else 0)
@@ -58,6 +91,8 @@ with model:
         dimensions=4,
         label='Input->Output Error'
     )
+    basal_ganglia = nengo.networks.BasalGanglia(dimensions=4)
+    nengo.Connection(basal_ganglia.input, error, synapse=None)
     
     in_conn = nengo.Connection(stim, a)
     conn = nengo.Connection(a, b, synapse=0.01)

@@ -34,7 +34,7 @@ class Arena:
     def __init__(self, n = 23, m = 23):
         self.n = n
         self.m = m
-        self.player: Point = Point(4, 3)
+        self.player: Point = Point(3, 3)
         self.goal: Point = Point(6, 1)
         self.grid = Arena._create_grid()
     
@@ -63,7 +63,7 @@ class Arena:
         grid = np.concatenate([grid, grid_horizontal_spacer], axis=0) # Append the horizontal spacer to the upper half
         grid = np.concatenate([grid, np.flip(grid_upper, axis=0)], axis=0) # Append the flipped upper half
         grid[12][11] = cls.WALL # The only asymmetical part of the map
-        grid[4][3] = cls.PLAYER # Default player position
+        grid[3][3] = cls.PLAYER # Default player position
         grid[1][6] = cls.GOAL # Default goal position
         return grid
     

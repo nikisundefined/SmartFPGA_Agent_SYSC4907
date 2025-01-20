@@ -8,11 +8,17 @@ import simulation
 from nengo.processes import WhiteSignal
 from nengo.solvers import LstsqL2
 
-north = [4,3,5,7,6,4,245,3,2,5,7,9,7,6,5,4,3,54,6,2] # test values
-south = [2,5,4,10,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9] # test values
+y = [4,3,13,13,6,4,15,3,2,5,7,9,20,6,15,4,13,14,6,12] # test value
+# (0,0) = top left (23,23) = bottem right
 model = nengo.Network(label = "north south test")
 with model:
     north_south = nengo.networks.BasalGanglia(dimensions = 2)
+    thal = nengo.networks.Thalamus(dimensions=2)
+
+
+# input 4 values between 0 and 23 chose largest distance from wall
+# 4 more, goal / current location; (x,y),(x,y)
+# compute to chose a cardinal direction
 
 
 class ActionIterator:
@@ -20,12 +26,11 @@ class ActionIterator:
         self.actions = np.ones(dimensions) * 0.1
 
     def step(self, t):
-        n_s = north[int(t)] - south[int(t)]
-        if (n_s >= 0):
+        if (np.random.randint(0,99) > 50): # if y > 12 north is good
             dominate  = 1
         else:
             dominate = 0
-        self.actions[:] = 0.1
+        self.actions[:] = -0.2  
         self.actions[dominate] = 0.8
         return self.actions
     
@@ -38,8 +43,30 @@ with model:
     selected_action = nengo.Probe(north_south.output, synapse = 0.01)
     input_actions = nengo.Probe(actions, synapse = 0.01)
 
+    nengo.Connection(north_south.output, thal.input)
     #more testing
     pre = nengo.Ensemble(60, dimensions=2)
-    nengo.Connection(north_south.input, pre)
+    nengo.Connection(pre, north_south.input)
     post = nengo.Ensemble(60, dimensions=2)
-    conn = nengo.Connection(post, north_south.output, function=lambda x: np.random.random(2))
+    conn = nengo.Connection(post, thal.input)
+
+    #adding in learning
+    error = nengo.Ensemble(60, dimensions=2)
+    error_p = nengo.Probe(error, synapse=0.03)
+
+    # Error = actual - target = post - pre
+    nengo.Connection(thal.output, error)
+    nengo.Connection(north_south.input, error, transform=-1)
+
+    # Add the learning rule to the connection
+    conn.learning_rule_type = nengo.PES()
+
+    # Connect the error into the learning rule
+    nengo.Connection(error, conn.learning_rule)
+
+def inhibit(t):
+    return 2.0 if t > 13.0 else 0.0
+
+with model:
+    inhib = nengo.Node(inhibit)
+    nengo.Connection(inhib, error.neurons, transform=[[-1]] * error.n_neurons)
