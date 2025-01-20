@@ -4,7 +4,6 @@ import numpy as np
 import random
 import math
 from PIL import Image, ImageDraw
-import cv2
 from enum import IntEnum
 
 goal_positions = [
@@ -29,14 +28,13 @@ class Arena:
     WALL = 1
     PLAYER = 2
     GOAL = 3
-    _window = None
     
-    def __init__(self, n = 23, m = 23):
-        self.n = n
-        self.m = m
-        self.player: Point = Point(4, 3)
+    def __init__(self, n: int = 23, m: int = 23):
+        self.n: int = n
+        self.m: int = m
+        self.player: Point = Point(3, 3)
         self.goal: Point = Point(6, 1)
-        self.grid = Arena._create_grid()
+        self.grid: np.ndarray = Arena._create_grid()
     
     @classmethod
     def _create_grid(cls) -> np.ndarray:
@@ -67,8 +65,11 @@ class Arena:
         grid[1][6] = cls.GOAL # Default goal position
         return grid
     
+    def on_goal(self) -> bool:
+        return self.player.x == self.goal.x and self.player.y == self.goal.y
+    
     def move(self, dir: Direction) -> None:
-        grid[self.player.y][self.player.x] = self.EMPTY
+        grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
         if dir == Direction.UP and self.grid[self.player.y - 1][self.player.x] != self.WALL:
             self.player.y -= 1
         elif dir == Direction.RIGHT and self.grid[self.player.y][self.player.x + 1] != self.WALL:
@@ -89,14 +90,20 @@ class Arena:
         
         grid[self.player.y][self.player.x] = self.PLAYER
     
-    def on_goal(self) -> bool:
-        return self.player.x == self.goal.x and self.player.y == self.goal.y
-    
-    def set_goal(self, x: int, y: int) -> None:
-        grid[self.goal.y][self.goal.x] = max(self.grid[self.goal.y][self.goal.x], self.EMPTY)
-        self.goal.x = x
-        self.goal.y = y
-        grid[self.goal.y][self.goal.x] = self.GOAL
+    def set_goal(self) -> None:
+        if self.on_goal():
+            self.grid[self.player.y][self.player.x] = self.PLAYER
+        else:
+            self.grid[self.goal.y][self.goal.x] = self.EMPTY
+
+        tmp_x: int = 0
+        tmp_y: int = 0
+        while self.grid[tmp_y][tmp_x] != self.WALL:
+            tmp_x = np.random.randint(0, 23)
+            tmp_y = np.random.randint(1, 22)
+        self.goal.x = tmp_x
+        self.goal.y = tmp_y
+        self.grid[self.goal.y][self.goal.x] = self.GOAL
     
     def detection(self) -> np.ndarray:
         dist_up = 0
@@ -132,15 +139,7 @@ class Arena:
         return s
 
     def display(self) -> None:
-        map_from = np.array([Arena.EMPTY, Arena.WALL, Arena.PLAYER, Arena.GOAL], np.uint8)
-        map_to = np.array([0x000000, 0x0000FF, 0xFFFF00, 0x00FF00], np.int32)
-        im = self.grid.copy().astype(np.int32)
-        for it in np.nditer(im, op_flags=['readwrite']):
-            it[...] = map_to[it]
-        im = cv2.cvtColor(im, cv2.COLOR_RGBA2BGRA)
-        cv2.imshow("Pacman", im)
-        cv2.waitKey(1)
-        
+        pass # TODO: Output a PIL Image that is saved when this function is called
     
 n = 23 # X length
 m = 23 # Y length
@@ -148,7 +147,6 @@ arena = Arena(n, m)
 grid = arena.grid
 
 if __name__ == "__main__":
-    #Arena._window = cv2.namedWindow("Pacman", cv2.WINDOW_AUTOSIZE)
     key: str = ""
 
     while key != 'q':
@@ -171,5 +169,3 @@ if __name__ == "__main__":
             new_goal = random.choice(list(set(goal_positions + [(arena.goal.x, arena.goal.y)])))
             arena.set_goal(new_goal[0], new_goal[1])
             print(f"Goal is now located at: ({arena.goal.x}, {arena.goal.y})")
-
-    #cv2.destroyAllWindows()
