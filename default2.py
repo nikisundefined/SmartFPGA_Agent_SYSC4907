@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+import matplotlib.pyplot as plt
 
 import math
 import time
 import nengo
+import nengo.simulator
 import numpy as np
 import simulation
 
@@ -142,3 +144,22 @@ with model:
         pre=err,
         post=conn_post_post.learning_rule
     )
+    post_probe = nengo.Probe(post_post, synapse=0.01)
+    pre_probe = nengo.Probe(pre, synapse=0.01)
+# matlab rep for easier visual
+with nengo.Simulator(model) as sim:
+    sim.run(120)
+
+plt.figure()
+plt.subplot(2,1,1)
+plt.plot(sim.trange(), sim.data[post_probe])
+plt.ylim(-0.1, 25)
+plt.xlabel("time [s]")
+plt.title("post")
+plt.subplot(2,1,2)
+plt.plot(sim.trange(), sim.data[pre_probe])
+plt.ylim(-0.1, 25)
+plt.xlabel("time [s]")
+plt.title("pre")
+plt.tight_layout()
+plt.show()
