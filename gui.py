@@ -19,7 +19,7 @@ def create_texture(n: int, m: int) -> list[float]:
     return texture_data
 
 # Updates the grid text with the current state of the arena
-def update_grid():
+def update_grid(tag: str | int = 'Environment'):
     global arena
     texture_data: list[float] = []
     _map: dict[int, list[float]] = {
@@ -35,7 +35,7 @@ def update_grid():
                 for _ in range(block_size): # Every X block
                     # RGBA pixel format
                     texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
-    dpg.set_value(item="Environment", value=texture_data)
+    dpg.set_value(item=tag, value=texture_data)
 
 def move(sender, app_data, user_data: simulation.Direction):
     arena.move(simulation.Direction(user_data))

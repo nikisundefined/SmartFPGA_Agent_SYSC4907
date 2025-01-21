@@ -13,9 +13,18 @@ goal_positions = [
 ]
 
 class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+    def __init__(self, x: int, y: int):
+        self.x: int = x
+        self.y: int = y
+
+    def __lt__(self, other: 'Point') -> bool:
+        return self.x < other.x or self.y < other.y
+    
+    def __gt__(self, other: 'Point') -> bool:
+        return self.x > other.x or self.y > other.y
+    
+    def __eq__(self, value: 'Point') -> bool:
+        return self.x == value.x and self.y == value.y
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -57,10 +66,10 @@ class Arena:
             [cls.WALL] * 5 + [cls.EMPTY, cls.WALL, cls.EMPTY] + [cls.WALL] * 3,
             [cls.WALL] + [cls.EMPTY] * 5 + [cls.WALL] + [cls.EMPTY] * 4,
             [cls.WALL, cls.EMPTY, cls.WALL, cls.WALL, cls.WALL, cls.WALL, cls.WALL, cls.EMPTY, cls.WALL, cls.WALL, cls.WALL]
-        ], np.int8)
+        ], np.float64)
         assert grid_quad.shape == (11, 11), f"Invalid grid shape: {grid_quad.shape}"
-        grid_horizontal_spacer = np.array([[cls.EMPTY] * 8 + [cls.WALL] + [cls.EMPTY] * 5 + [cls.WALL] + [cls.EMPTY] * 8], np.int8) # The line between the bottom and top halves
-        grid_vertical_spacer = np.array([[cls.WALL, cls.EMPTY, cls.EMPTY, cls.EMPTY, cls.WALL, cls.EMPTY, cls.WALL, cls.EMPTY, cls.WALL, cls.EMPTY, cls.EMPTY]], np.int8).transpose() # The line between the left and right halves
+        grid_horizontal_spacer = np.array([[cls.EMPTY] * 8 + [cls.WALL] + [cls.EMPTY] * 5 + [cls.WALL] + [cls.EMPTY] * 8], np.float64) # The line between the bottom and top halves
+        grid_vertical_spacer = np.array([[cls.WALL, cls.EMPTY, cls.EMPTY, cls.EMPTY, cls.WALL, cls.EMPTY, cls.WALL, cls.EMPTY, cls.WALL, cls.EMPTY, cls.EMPTY]], np.float64).transpose() # The line between the left and right halves
         grid = np.concatenate([grid_quad, grid_vertical_spacer], axis=1) # Append the vertical spacer to the quadrant
         grid = np.concatenate([grid, np.flip(grid_quad, axis=1)], axis=1) # Append the flipped quadrant
         grid_upper = grid.copy() # Make a copy of the upper half of the grid
@@ -129,7 +138,7 @@ class Arena:
         dist_right = 0
         while self.grid[self.player.y][self.player.x + dist_right + 1] != self.WALL:
             dist_right += 1
-        return np.array([dist_up, dist_down, dist_left, dist_right], np.int8)
+        return np.array([dist_up, dist_down, dist_left, dist_right], np.float64)
     
     def distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
