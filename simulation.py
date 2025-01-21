@@ -16,6 +16,12 @@ class Point:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+
+    def __str__(self) -> str:
+        return self.__repr__()
+    
+    def __repr__(self) -> str:
+        return f"({self.x},{self.y})"
         
 class Direction(IntEnum):
     UP = 0
@@ -61,7 +67,7 @@ class Arena:
         grid = np.concatenate([grid, grid_horizontal_spacer], axis=0) # Append the horizontal spacer to the upper half
         grid = np.concatenate([grid, np.flip(grid_upper, axis=0)], axis=0) # Append the flipped upper half
         grid[12][11] = cls.WALL # The only asymmetical part of the map
-        grid[4][3] = cls.PLAYER # Default player position
+        grid[3][3] = cls.PLAYER # Default player position
         grid[1][6] = cls.GOAL # Default goal position
         return grid
     
@@ -69,14 +75,19 @@ class Arena:
         return self.player.x == self.goal.x and self.player.y == self.goal.y
     
     def move(self, dir: Direction) -> None:
-        grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
-        if dir == Direction.UP and self.grid[self.player.y - 1][self.player.x] != self.WALL:
+        if type(dir) == int and dir < 4:
+            dir = Direction(dir)
+        elif type(dir) != Direction:
+            raise TypeError()
+        
+        self.grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
+        if dir == int(Direction.UP) and self.grid[self.player.y - 1][self.player.x] != self.WALL:
             self.player.y -= 1
-        elif dir == Direction.RIGHT and self.grid[self.player.y][self.player.x + 1] != self.WALL:
+        elif dir == int(Direction.RIGHT) and self.grid[self.player.y][self.player.x + 1] != self.WALL:
             self.player.x += 1
-        elif dir == Direction.DOWN and self.grid[self.player.y + 1][self.player.x] != self.WALL:
+        elif dir == int(Direction.DOWN) and self.grid[self.player.y + 1][self.player.x] != self.WALL:
             self.player.y += 1
-        elif dir == Direction.LEFT and self.grid[self.player.y][self.player.x - 1] != self.WALL:
+        elif dir == int(Direction.LEFT) and self.grid[self.player.y][self.player.x - 1] != self.WALL:
             self.player.x -= 1
         
         if self.player.x >= self.n:
@@ -88,7 +99,7 @@ class Arena:
         elif self.player.y < 0:
             self.player.y = self.m - 1
         
-        grid[self.player.y][self.player.x] = self.PLAYER
+        self.grid[self.player.y][self.player.x] = self.PLAYER
     
     def set_goal(self) -> None:
         if self.on_goal():
@@ -98,7 +109,7 @@ class Arena:
 
         tmp_x: int = 0
         tmp_y: int = 0
-        while self.grid[tmp_y][tmp_x] != self.WALL:
+        while self.grid[tmp_y][tmp_x] == self.WALL:
             tmp_x = np.random.randint(0, 23)
             tmp_y = np.random.randint(1, 22)
         self.goal.x = tmp_x
@@ -140,13 +151,12 @@ class Arena:
 
     def display(self) -> None:
         pass # TODO: Output a PIL Image that is saved when this function is called
-    
-n = 23 # X length
-m = 23 # Y length
-arena = Arena(n, m)
-grid = arena.grid
 
 if __name__ == "__main__":
+    n = 23 # X length
+    m = 23 # Y length
+    arena = Arena(n, m)
+    grid = arena.grid
     key: str = ""
 
     while key != 'q':
