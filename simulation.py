@@ -43,12 +43,15 @@ class Arena:
     WALL = 1
     PLAYER = 2
     GOAL = 3
+
+    _player_start: Point = Point(3, 3)
+    _goal_start: Point = Point(6, 1)
     
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n
         self.m: int = m
-        self.player: Point = Point(3, 3)
-        self.goal: Point = Point(6, 1)
+        self.player: Point = Point(Arena._player_start.x, Arena._player_start.y)
+        self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
     
     @classmethod
@@ -76,8 +79,8 @@ class Arena:
         grid = np.concatenate([grid, grid_horizontal_spacer], axis=0) # Append the horizontal spacer to the upper half
         grid = np.concatenate([grid, np.flip(grid_upper, axis=0)], axis=0) # Append the flipped upper half
         grid[12][11] = cls.WALL # The only asymmetical part of the map
-        grid[3][3] = cls.PLAYER # Default player position
-        grid[1][6] = cls.GOAL # Default goal position
+        grid[Arena._player_start.y][Arena._player_start.x] = cls.PLAYER # Default player position
+        grid[Arena._goal_start.y][Arena._goal_start.x] = cls.GOAL # Default goal position
         return grid
     
     def on_goal(self) -> bool:
@@ -90,7 +93,12 @@ class Arena:
             raise TypeError()
         
         self.grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
-        if dir == int(Direction.UP) and self.grid[self.player.y - 1][self.player.x] != self.WALL:
+
+        if dir == int(Direction.RIGHT) and self.player.x == 22:
+            self.player.x = 23
+        elif dir == int(Direction.LEFT) and self.player.y == 0:
+            self.player.x = 22
+        elif dir == int(Direction.UP) and self.grid[self.player.y - 1][self.player.x] != self.WALL:
             self.player.y -= 1
         elif dir == int(Direction.RIGHT) and self.grid[self.player.y][self.player.x + 1] != self.WALL:
             self.player.x += 1
@@ -118,7 +126,7 @@ class Arena:
 
         tmp_x: int = 0
         tmp_y: int = 0
-        while self.grid[tmp_y][tmp_x] == self.WALL:
+        while self.grid[tmp_y][tmp_x] == self.WALL or (tmp_x == 11 and (tmp_y == 5 or tmp_y == 17)):
             tmp_x = np.random.randint(0, 23)
             tmp_y = np.random.randint(1, 22)
         self.goal.x = tmp_x
