@@ -370,3 +370,23 @@ if __name__ == '__main__':
     #         if time.time() < expected_end_time:
     #             time.sleep(expected_end_time - time.time())
     # dpg.destroy_context()
+
+    n = 0
+    e = 0
+    s = 0
+    w = 0
+    Ll = [0,0,0,0] # should be 4-d
+    Cl = [0,0,0,0] # should be 4-d
+    Gl = [0,0,0,0] # should be 4-d
+    diff_ll_cl = Ll - Cl # should be 4-d
+    diff_cl_gl = Cl - Gl # should be 4-d
+    diff_ll_gl = Ll - Gl # should be 4-d
+    diff_clgl_llgl = diff_cl_gl - diff_ll_gl
+    # Weight adjust dynamical adds to 1
+    weight_move = 0.6 # adjusted dynamical
+    weight_goal = 0.3 # adjusted dynamical
+    weight_direction = 0.1 # adjusted dynamical
+    Sd = [n,e,s,w] # should be 4-d
+    error_formula = ((diff_ll_cl * weight_move) + 
+                     (diff_clgl_llgl * weight_goal) + 
+                     (Sd * weight_direction))
