@@ -87,7 +87,7 @@ class Arena:
     PLAYER = 2
     GOAL = 3
 
-    _player_start: Point = Point(3, 3)
+    _player_start: Point = Point(3,3)
     _goal_start: Point = Point(6, 1)
     
     def __init__(self, n: int = 23, m: int = 23):
@@ -215,10 +215,12 @@ class Arena:
             dist_down += 1
 
         dist_left = 0
+        wrap_offset_left = 0
         while self._tile(self.player, offset_x=dist_left-1) != self.WALL:
             dist_left += 1
 
         dist_right = 0
+        wrap_offset_right = 0
         while self._tile(self.player, offset_x=dist_right+1) != self.WALL:
             dist_right += 1
 

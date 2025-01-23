@@ -22,7 +22,11 @@ current: np.ndarray = np.random.randint(low=0, high=23, size=(2))
 
 flipped: int = 1
 prev_state: float = 0.0
-rl_state: float = 0.0
+rl_state: float = 1.0
+
+MOVEMENT_WEIGHT: float = 0.6
+GOAL_WEIGHT: float = 0.3
+DIRECTION_WEIGHT: float = 0.1
 
 arena: Arena = Arena()
 gui_callback = None
@@ -37,6 +41,10 @@ def goal_location(t: float) -> np.ndarray:
     global arena
     return np.array([arena.goal.x, arena.goal.y], dtype=np.float64)
 
+def last_location(t: float) -> np.ndarray:
+    global arena
+    return np.array([arena.player.positions[-1].x, arena.player.positions[-1].y], dtype=np.float64)
+
 # moves the player based on the movement vector (2D)
 # Process:
 #   Determine how to move (x = + or -, or y = + or -)
@@ -50,7 +58,7 @@ def move(t: float, x: np.ndarray):
 
     global arena, player_moved, action_performed
     index = int(np.argmax(x))
-    if math.isclose(x[index],0,rel_tol=1e-2):
+    if math.isclose(x[index],0,rel_tol=1e-1):
         print(f"  No action selected")
         player_moved = False
         return
@@ -78,13 +86,13 @@ def move(t: float, x: np.ndarray):
 #   Place the current state and previous state in the last 2 dimentions
 def error(t: float, x: np.ndarray):
     RL_MOVE_REWARD: float = -0.01
-    RL_MOVE_PUNISH: float = 0.01
-    RL_STOPPED_PUNISH: float = 0.02
-    RL_REPEATED_PUNISH: float = 0.1
+    RL_MOVE_PUNISH: float = 0.001
+    RL_STOPPED_PUNISH: float = 0.002
+    RL_REPEATED_PUNISH: float = 0.01
     global arena, last_action, player_moved, prev_state, rl_state, flipped
     # Early return to only update error every ~1 second
-    # if not math.isclose(t, int(t)):
-    #     return np.array([-x[1], x[1], -x[0], x[0]], dtype=np.float64) * rl_state
+    if not math.isclose(t, int(t)):
+        return flipped * np.array([x[1], -x[0], -x[1], x[0]], dtype=np.float64) * rl_state
 
     prev_state = rl_state # save the previous learning value
 
@@ -93,10 +101,10 @@ def error(t: float, x: np.ndarray):
         rl_state += RL_STOPPED_PUNISH
 
     # If the the player has travelled in a loop or is stuck on a wall
-    if len(arena.player.positions) > 5 and len(set(arena.player.positions[-5:])) < 3:
+    if len(arena.player.positions) > 8 and len(set(arena.player.positions[-8:])) == 1:
         print("  Flipping")
         arena.player.positions.clear() # Clear the positions to reset the count
-        flipped *= -1 # invert the value of flipped
+        #flipped *= -1 # invert the value of flipped
         rl_state += RL_REPEATED_PUNISH # Punish the model for this action
 
     # Compute reward/punishment for going in the right/wrong direction
@@ -120,8 +128,10 @@ def error(t: float, x: np.ndarray):
             rl_state += RL_MOVE_REWARD
         else:
             rl_state += RL_MOVE_PUNISH
+    
+    rl_state = max(0.01, rl_state)
 
-    return flipped * np.array([-x[1], x[1], -x[0], x[0]], dtype=np.float64) * rl_state
+    return flipped * np.array([x[1], -x[0], -x[1], x[0]], dtype=np.float64) * rl_state
     # check if the agent is moving towards the goal based on {last_action}
     # check that the {last_action} did not try to move the agent into a wall
     # TODO future: check if the action have been performed repeatedly/looping
