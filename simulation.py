@@ -3,14 +3,7 @@
 import numpy as np
 import random
 import math
-from PIL import Image, ImageDraw
 from enum import IntEnum
-
-goal_positions = [
-    (6, 1),
-    (16, 1),
-    (15, 5),
-]
 
 class Point:
     def __init__(self, x: int, y: int):
@@ -25,6 +18,9 @@ class Point:
     
     def __eq__(self, value: 'Point') -> bool:
         return self.x == value.x and self.y == value.y
+    
+    def __hash__(self):
+        return hash((self.x - self.y) * (self.x * self.y))
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -38,6 +34,53 @@ class Direction(IntEnum):
     DOWN = 2
     LEFT = 3
 
+class Player:
+    @classmethod
+    def frompoint(cls, p: Point) -> 'Point':
+        return cls(p.x, p.y, 0, [])
+    
+    @classmethod
+    def fromcoordinate(cls, x: int, y: int) -> 'Point':
+        return cls(x, y, 0, [])
+
+    def __init__(self, x: int, y: int, score: int, positions: list[Point]):
+        self.point: Point = Point(x, y)
+        self.score: int = score
+        self.positions: list[Point] = positions
+    
+    def move(self, dir: Direction):
+        match int(dir):
+            case int(Direction.UP):
+                self.y -= 1
+            case int(Direction.DOWN):
+                self.y += 1
+            case int(Direction.LEFT):
+                self.x -= 1
+            case int(Direction.RIGHT):
+                self.x += 1
+    
+    def collect_goal(self):
+        self.score += 100
+    
+    def __str__(self) -> str:
+        return str(self.point)
+
+    @property
+    def x(self) -> int:
+        return self.point.x
+    
+    @x.setter
+    def x(self, x: int) -> None:
+        self.point.x = x
+    
+    @property
+    def y(self) -> int:
+        return self.point.y
+    
+    @y.setter
+    def y(self, y: int) -> None:
+        self.point.y = y
+
 class Arena:
     EMPTY = 0
     WALL = 1
@@ -50,7 +93,7 @@ class Arena:
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n
         self.m: int = m
-        self.player: Point = Point(Arena._player_start.x, Arena._player_start.y)
+        self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
     
@@ -82,31 +125,51 @@ class Arena:
         grid[Arena._player_start.y][Arena._player_start.x] = cls.PLAYER # Default player position
         grid[Arena._goal_start.y][Arena._goal_start.x] = cls.GOAL # Default goal position
         return grid
+
+    def _tile(self, *args, **kwargs) -> int:
+        if type(args[0]) == int:
+            return self._tile_pos(args[0], args[1])
+        elif 'x' in kwargs and 'y' in kwargs:
+            return self._tile_pos(kwargs['x'], kwargs['y'])
+        elif type(args[0]) == Point or type(args[0]) == Player:
+            return self._tile_pnt(args[0], kwargs.get('offset_x', 0), kwargs.get('offset_y', 0))
+        elif 'p' in kwargs:
+            return self._tile_pnt(kwargs['p'], kwargs.get('offset_x', 0), kwargs.get('offset_y', 0))
+
+    # Get the tile at the point or players location offset by the given amount
+    def _tile_pnt(self, p: Point | Player, offset_x: int = 0, offset_y: int = 0) -> int:
+        return self.grid[p.y + offset_y][p.x + offset_x]
     
+    # Get the tile at the given location
+    def _tile_pos(self, x: int, y: int) -> int:
+        return self.grid[y][x]
+    
+    # Check if the player is on the goal
     def on_goal(self) -> bool:
-        return self.player.x == self.goal.x and self.player.y == self.goal.y
+        return self.player == self.goal
     
     def move(self, dir: Direction) -> None:
-        if type(dir) == int and dir < 4:
-            dir = Direction(dir)
-        elif type(dir) != Direction:
-            raise TypeError()
-        
+        """Moves the player in the direction given"""
+        # Reset the tile on the grid incase we move the player
         self.grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
 
-        if dir == int(Direction.RIGHT) and self.player.x == 22:
-            self.player.x = 23
-        elif dir == int(Direction.LEFT) and self.player.y == 0:
-            self.player.x = 22
-        elif dir == int(Direction.UP) and self.grid[self.player.y - 1][self.player.x] != self.WALL:
-            self.player.y -= 1
-        elif dir == int(Direction.RIGHT) and self.grid[self.player.y][self.player.x + 1] != self.WALL:
-            self.player.x += 1
-        elif dir == int(Direction.DOWN) and self.grid[self.player.y + 1][self.player.x] != self.WALL:
-            self.player.y += 1
-        elif dir == int(Direction.LEFT) and self.grid[self.player.y][self.player.x - 1] != self.WALL:
-            self.player.x -= 1
+        # Check if the player is allowed to move in that direction
+        match int(dir):
+            case int(Direction.UP):
+                if self._tile(self.player, offset_y=-1) != self.WALL:
+                    self.player.move(dir)
+            case int(Direction.DOWN):
+                if self._tile(self.player, offset_y=1) != self.WALL:
+                    self.player.move(dir)
+            case int(Direction.LEFT):
+                # Special check if the player is at the edge of the screen to wrap them to the otherside
+                if self.player.x == 0 or self._tile(self.player, offset_x=-1) != self.WALL:
+                    self.player.move(dir)
+            case int(Direction.RIGHT):
+                if self.player.x == 22 or self._tile(self.player, offset_x=1) != self.WALL:
+                    self.player.move(dir)
         
+        # Ensure the player is within the bounds of the arena
         if self.player.x >= self.n:
             self.player.x = 0
         elif self.player.x < 0:
@@ -116,38 +179,52 @@ class Arena:
         elif self.player.y < 0:
             self.player.y = self.m - 1
         
+        # Add the updated position to the list of player positions
+        self.player.positions.append(Point(self.player.x, self.player.y))
+        
+        # Update the grid to display the players location
         self.grid[self.player.y][self.player.x] = self.PLAYER
-    
+
     def set_goal(self) -> None:
+        """Change the location of the goal. Should ony be called after Arena.on_goal() returns True"""
+        # Clear the goal from the grid
         if self.on_goal():
             self.grid[self.player.y][self.player.x] = self.PLAYER
+            self.player.collect_goal()
         else:
             self.grid[self.goal.y][self.goal.x] = self.EMPTY
 
-        tmp_x: int = 0
-        tmp_y: int = 0
-        while self.grid[tmp_y][tmp_x] == self.WALL or (tmp_x == 11 and (tmp_y == 5 or tmp_y == 17)):
-            tmp_x = np.random.randint(0, 23)
-            tmp_y = np.random.randint(1, 22)
-        self.goal.x = tmp_x
-        self.goal.y = tmp_y
+        # Keep generating random locations for the goal while they are not walls
+        tmp: Point = Point(0, 0)
+        # Special condition: 2 tile cannot be reached an must be manually excluded
+        while self._tile(tmp) == self.WALL or (tmp.x == 11 and (tmp.y == 5 or tmp.y == 17)):
+            tmp.x = np.random.randint(0, 23)
+            tmp.y = np.random.randint(1, 22)
+        self.goal = tmp
         self.grid[self.goal.y][self.goal.x] = self.GOAL
     
     def detection(self) -> np.ndarray:
+        """Returns the open space in the directions North, East, South, West"""
+        # Scan out from the player in a direction until you hit a wall
         dist_up = 0
-        while self.grid[self.player.y - dist_up - 1][self.player.x] != self.WALL:
+        while self._tile(self.player, offset_y=dist_up-1) != self.WALL:
             dist_up += 1
+
         dist_down = 0
-        while self.grid[self.player.y + dist_down + 1][self.player.x] != self.WALL:
+        while self._tile(self.player, offset_y=dist_down+1) != self.WALL:
             dist_down += 1
+
         dist_left = 0
-        while self.grid[self.player.y][self.player.x - dist_left - 1] != self.WALL:
+        while self._tile(self.player, offset_x=dist_left-1) != self.WALL:
             dist_left += 1
+
         dist_right = 0
-        while self.grid[self.player.y][self.player.x + dist_right + 1] != self.WALL:
+        while self._tile(self.player, offset_x=dist_right+1) != self.WALL:
             dist_right += 1
-        return np.array([dist_up, dist_down, dist_left, dist_right], np.float64)
+
+        return np.array([dist_up, dist_right, dist_down, dist_left], np.float64)
     
+    # The absolute distance from the player to the goal
     def distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
     
@@ -166,8 +243,8 @@ class Arena:
             s += "\n"
         return s
 
-    def display(self) -> None:
-        pass # TODO: Output a PIL Image that is saved when this function is called
+    def display(self, block_size: int = 10, wall_color: int = 0x0000FFFF, player_color: int = 0xFFFF00FF, goal_color: int = 0x00FF00FF) -> np.ndarray:
+        pass
 
 if __name__ == "__main__":
     n = 23 # X length
@@ -193,6 +270,5 @@ if __name__ == "__main__":
         
         if arena.on_goal():
             print("Player has reached the goal")
-            new_goal = random.choice(list(set(goal_positions + [(arena.goal.x, arena.goal.y)])))
-            arena.set_goal(new_goal[0], new_goal[1])
+            arena.set_goal()
             print(f"Goal is now located at: ({arena.goal.x}, {arena.goal.y})")

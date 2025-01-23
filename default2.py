@@ -3,15 +3,14 @@
 import math
 import nengo
 import numpy as np
-import simulation
-from simulation import Arena
+from simulation import Arena, Direction, Point
 
-last_action: simulation.Direction = None
+last_action: Direction = None
 player_moved: bool = True
 ensemble_neurons = 100
 learning_rate: float = 5e-6
 neuron_type: nengo.neurons.NeuronType = nengo.SpikingRectifiedLinear()
-solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True)
+solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=False)
 learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate)
 input_dimensions = 4
 output_dimensions = 4
@@ -21,10 +20,11 @@ distances: np.ndarray = np.random.randint(low=0, high=23, size=(4))
 goal: np.ndarray = np.random.randint(low=0, high=23, size=(2))
 current: np.ndarray = np.random.randint(low=0, high=23, size=(2))
 
+flipped: int = 1
 prev_state: float = 0.0
 rl_state: float = 0.0
 
-arena: simulation.Arena = Arena()
+arena: Arena = Arena()
 gui_callback = None
 action_performed: bool = False
 
@@ -50,20 +50,20 @@ def move(t: float, x: np.ndarray):
 
     global arena, player_moved, action_performed
     index = int(np.argmax(x))
-    if math.isclose(x[index],0):
+    if math.isclose(x[index],0,rel_tol=1e-2):
         print(f"  No action selected")
         player_moved = False
         return
     
     assert index >= 0 and index <= 3, f"ERROR: Index out of range: {index}"
-    tmp = simulation.Point(arena.player.x, arena.player.y)
+    tmp = Point(arena.player.x, arena.player.y)
     arena.move(index)
 
     if player_moved and tmp == arena.player:
         print(f"  Player has stopped moving at {arena.player}")
     player_moved = tmp != arena.player
 
-    print(f"  Direction {simulation.Direction(index).name} {x}")
+    print(f"  Direction {Direction(index).name} {x}")
     print(f"  Player Location: {arena.player} | Goal Location: {arena.goal}")
 
     if arena.on_goal():
@@ -77,91 +77,54 @@ def move(t: float, x: np.ndarray):
 # Expand the error signal dimensions:
 #   Place the current state and previous state in the last 2 dimentions
 def error(t: float, x: np.ndarray):
-    global arena, last_action, player_moved, prev_state, rl_state
+    RL_MOVE_REWARD: float = -0.01
+    RL_MOVE_PUNISH: float = 0.01
+    RL_STOPPED_PUNISH: float = 0.02
+    RL_REPEATED_PUNISH: float = 0.1
+    global arena, last_action, player_moved, prev_state, rl_state, flipped
     # Early return to only update error every ~1 second
-    if not math.isclose(t, int(t)):
-        return np.array([-x[1], x[1], -x[0], x[0]], dtype=np.float64) * rl_state
+    # if not math.isclose(t, int(t)):
+    #     return np.array([-x[1], x[1], -x[0], x[0]], dtype=np.float64) * rl_state
 
     prev_state = rl_state # save the previous learning value
 
     # Punish moving into walls/not moving
     if not player_moved:
-        rl_state += 2
+        rl_state += RL_STOPPED_PUNISH
 
-    def prev_pos(dir: simulation.Direction) -> simulation.Point:
-        global arena
-        if dir == int(simulation.Direction.UP):
-            return simulation.Point(arena.player.x, arena.player.y - 1)
-        elif dir == int(simulation.Direction.DOWN):
-            return simulation.Point(arena.player.x, arena.player.y + 1)
-        elif dir == int(simulation.Direction.LEFT):
-            return simulation.Point(arena.player.x + 1, arena.player.y)
-        elif dir == int(simulation.Direction.RIGHT):
-            return simulation.Point(arena.player.x - 1, arena.player.y)
+    # If the the player has travelled in a loop or is stuck on a wall
+    if len(arena.player.positions) > 5 and len(set(arena.player.positions[-5:])) < 3:
+        print("  Flipping")
+        arena.player.positions.clear() # Clear the positions to reset the count
+        flipped *= -1 # invert the value of flipped
+        rl_state += RL_REPEATED_PUNISH # Punish the model for this action
 
     # Compute reward/punishment for going in the right/wrong direction
-    if last_action == simulation.Direction.UP:
+    if last_action == Direction.UP:
         if arena.player.y > arena.goal.y:
-            rl_state += 1 # Reward going towards the goal
+            rl_state += RL_MOVE_REWARD # Reward going towards the goal
         else:
-            rl_state -= 1 # Punish going away from the goal
-    elif last_action == simulation.Direction.DOWN:
+            rl_state += RL_MOVE_PUNISH # Punish going away from the goal
+    elif last_action == Direction.DOWN:
         if arena.player.y < arena.goal.y:
-            rl_state += 1
+            rl_state += RL_MOVE_REWARD
         else:
-            rl_state -= 1
-    elif last_action == simulation.Direction.LEFT:
+            rl_state += RL_MOVE_PUNISH
+    elif last_action == Direction.LEFT:
         if arena.player.x > arena.goal.x:
-            rl_state += 1
+            rl_state += RL_MOVE_REWARD
         else:
-            rl_state -= 1
-    elif last_action == simulation.Direction.LEFT:
+            rl_state += RL_MOVE_PUNISH
+    elif last_action == Direction.LEFT:
         if arena.player.x < arena.goal.x:
-            rl_state += 1
+            rl_state += RL_MOVE_REWARD
         else:
-            rl_state -= 1
+            rl_state += RL_MOVE_PUNISH
 
-    return np.array([-x[1], x[1], -x[0], x[0]], dtype=np.float64) * rl_state
+    return flipped * np.array([-x[1], x[1], -x[0], x[0]], dtype=np.float64) * rl_state
     # check if the agent is moving towards the goal based on {last_action}
     # check that the {last_action} did not try to move the agent into a wall
     # TODO future: check if the action have been performed repeatedly/looping
-
-# def error_scale(t: float, x: np.ndarray):
-#     global arena, last_action, player_moved, prev_state, rl_state
-#     # Scales the error that is given by the reward value
-#     if not math.isclose(t, int(t)):
-#         return np.array([x[0], -x[0], x[1], -x[1]], dtype=np.float64) * rl_state
-    
-#     prev_state = rl_state # save the previous learning value
-
-#     # Punish moving into walls/not moving
-#     if not player_moved:
-#         rl_state += 2 # Punishments are positive to increase the error
-    
-#     # Compute reward/punishment for going in the right/wrong direction
-#     if last_action == simulation.Direction.UP:
-#         if arena.player.y > arena.goal.y:
-#             rl_state -= 1 # Reward going towards the goal
-#         else:
-#             rl_state += 1 # Punish going away from the goal
-#     elif last_action == simulation.Direction.DOWN:
-#         if arena.player.y < arena.goal.y:
-#             rl_state -= 1
-#         else:
-#             rl_state += 1
-#     elif last_action == simulation.Direction.LEFT:
-#         if arena.player.x > arena.goal.x:
-#             rl_state -= 1
-#         else:
-#             rl_state += 1
-#     elif last_action == simulation.Direction.LEFT:
-#         if arena.player.x < arena.goal.x:
-#             rl_state -= 1
-#         else:
-#             rl_state += 1
-    
-#     rl_state = max(rl_state, 1) # Clamp positive reward to 1
-#     return np.array([x[0], -x[0], x[1], -x[1]], dtype=np.float64) * rl_state
 
 def step(t: float) -> np.ndarray:
     global arena
@@ -170,12 +133,28 @@ def step(t: float) -> np.ndarray:
     # return np.zeros((4,), dtype=np.float64)
 
 def limiter(t: float):
-    global action_performed
+    global action_performed, flipped, rl_state
     if action_performed:
-        print("Suppressing Post Ensemble")
         action_performed = False
         return 1
     return 0
+
+def generate_grid_image(arena: Arena, block_size: int = 10):
+    texture_data: list[float] = []
+    _map: dict[int, list[float]] = {
+        Arena.EMPTY: [0, 0, 0, 0], # Black
+        Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
+        Arena.PLAYER: [255/ 255, 255 / 255, 0, 255/ 255], # Yellow
+        Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
+    }
+
+    for y in range(arena.m): # Every Y coordinate
+        for _ in range(block_size): # Every Y block
+            for x in range(arena.n): # Every X coordinate
+                for _ in range(block_size): # Every X block
+                    # RGBA pixel format
+                    texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
+    return texture_data
 
 # Goal: choose the direction with the largest value in the direction of the goal
 # nparray with 4 random values (detection distance)
@@ -184,7 +163,7 @@ def limiter(t: float):
 # error is computed as the differece in current and goal positions
 # want to choose the direction that has the largest value in the direction which minimizes error
 
-model = nengo.Network(label='pacman', seed=0)
+model = nengo.Network(label='pacman')
 with model:
     bg = nengo.networks.BasalGanglia(dimensions=output_dimensions)
     thal = nengo.networks.Thalamus(dimensions=output_dimensions)
@@ -245,6 +224,7 @@ with model:
     conn_dist_in = nengo.Connection(
         pre=dist_in,
         post=pre,
+        function=lambda x: x - 12,
         label='Distance Input Connection',
     )
     conn_pre_post = nengo.Connection(
@@ -294,67 +274,89 @@ with model:
         label='Learning Connection'
     )
 
-    # conn_shutoff = nengo.Connection(
-    #     pre=shutoff_gate, 
-    #     post=post.neurons, 
-    #     transform=-1000*np.ones((post.n_neurons, 1)), 
-    #     synapse=None,
-    #     label='Limiter'
-    # )
+    conn_shutoff = nengo.Connection(
+        pre=shutoff_gate, 
+        post=post.neurons, 
+        transform=-1000*np.ones((post.n_neurons, 1)), 
+        synapse=None,
+        label='Limiter'
+    )
 
 if __name__ == '__main__':
-    import dearpygui.dearpygui as dpg
-    from gui import create_texture
+    import gui
     import time
+    import dearpygui.dearpygui as dpg
 
     target_frame_rate = 30
 
-    rows = 23
-    columns = 23
-    block_size: int = 10
-    width = columns * block_size
-    height = rows * block_size
-
-    # Updates the grid text with the current state of the arena
-    def update_grid(tag: str | int = 'Environment'):
-        global arena
-        texture_data: list[float] = []
-        _map: dict[int, list[float]] = {
-            simulation.Arena.EMPTY: [0, 0, 0, 0], # Black
-            simulation.Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
-            simulation.Arena.PLAYER: [255/ 255, 255 / 255, 0, 255/ 255], # Yellow
-            simulation.Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
-        }
-
-        for y in range(arena.m): # Every Y coordinate
-            for _ in range(block_size): # Every Y block
-                for x in range(arena.n): # Every X coordinate
-                    for _ in range(block_size): # Every X block
-                        # RGBA pixel format
-                        texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
-        dpg.set_value(item=tag, value=texture_data)
-
-    dpg.create_context()
-    dpg.create_viewport(title='Pacman [float]', width=width + 100, height=height + 100)
-    dpg.setup_dearpygui()
-
-    arena_texture: list[float] = create_texture(rows * block_size, columns * block_size)
-    with dpg.texture_registry(show=False):
-        dpg.add_dynamic_texture(width=width, height=height, default_value=arena_texture, tag='Environment')
-    update_grid()
-
-    with dpg.window(tag="Pacman"):
-        dpg.add_image("Environment", width=width, height=height)
-
-    dpg.show_viewport()
-    dpg.set_primary_window("Pacman", True)
-    with nengo.Simulator(model, seed=0, dt=(1.0/target_frame_rate)) as sim:
+    gui.create_gui(arena)
+    with nengo.Simulator(model, dt=(1.0/target_frame_rate)) as sim:
+        dpg.add_text(f"{sim.seed}", tag='seed', parent='Pacman')
+        
+        gui.display_gui()
         while dpg.is_dearpygui_running():
             start_time = time.time()
             sim.step()
-            update_grid()
+            gui.update_text()
+            dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265])
+            gui.update_grid(arena)
             dpg.render_dearpygui_frame()
             expected_end_time = start_time + (1.0 / target_frame_rate)
             if time.time() < expected_end_time:
                 time.sleep(expected_end_time - time.time())
     dpg.destroy_context()
+
+    # from gui import create_texture
+    # import time
+
+    # target_frame_rate = 30
+
+    # rows = 23
+    # columns = 23
+    # block_size: int = 10
+    # width = columns * block_size
+    # height = rows * block_size
+
+    # # Updates the grid text with the current state of the arena
+    # def update_grid(tag: str | int = 'Environment'):
+    #     global arena
+    #     texture_data: list[float] = []
+    #     _map: dict[int, list[float]] = {
+    #         Arena.EMPTY: [0, 0, 0, 0], # Black
+    #         Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
+    #         Arena.PLAYER: [255/ 255, 255 / 255, 0, 255/ 255], # Yellow
+    #         Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
+    #     }
+
+    #     for y in range(arena.m): # Every Y coordinate
+    #         for _ in range(block_size): # Every Y block
+    #             for x in range(arena.n): # Every X coordinate
+    #                 for _ in range(block_size): # Every X block
+    #                     # RGBA pixel format
+    #                     texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
+    #     dpg.set_value(item=tag, value=texture_data)
+
+    # dpg.create_context()
+    # dpg.create_viewport(title='Pacman [float]', width=width + 100, height=height + 100)
+    # dpg.setup_dearpygui()
+
+    # arena_texture: list[float] = create_texture(rows * block_size, columns * block_size)
+    # with dpg.texture_registry(show=False):
+    #     dpg.add_dynamic_texture(width=width, height=height, default_value=arena_texture, tag='Environment')
+    # update_grid()
+
+    # with dpg.window(tag="Pacman"):
+    #     dpg.add_image("Environment", width=width, height=height)
+
+    # dpg.show_viewport()
+    # dpg.set_primary_window("Pacman", True)
+    # with nengo.Simulator(model, seed=0, dt=(1.0/target_frame_rate)) as sim:
+    #     while dpg.is_dearpygui_running():
+    #         start_time = time.time()
+    #         sim.step()
+    #         update_grid()
+    #         dpg.render_dearpygui_frame()
+    #         expected_end_time = start_time + (1.0 / target_frame_rate)
+    #         if time.time() < expected_end_time:
+    #             time.sleep(expected_end_time - time.time())
+    # dpg.destroy_context()
