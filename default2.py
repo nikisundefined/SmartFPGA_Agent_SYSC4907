@@ -14,7 +14,7 @@ solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=False)
 learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate)
 input_dimensions = 4
 output_dimensions = 4
-error_dimensions = 2
+error_dimensions = 4
 
 distances: np.ndarray = np.random.randint(low=0, high=23, size=(4))
 goal: np.ndarray = np.random.randint(low=0, high=23, size=(2))
@@ -24,9 +24,8 @@ flipped: int = 1
 prev_state: float = 0.0
 rl_state: float = 1.0
 
-MOVEMENT_WEIGHT: float = 0.6
-GOAL_WEIGHT: float = 0.3
-DIRECTION_WEIGHT: float = 0.1
+MOVEMENT_WEIGHT: float = 0.8
+DIRECTION_WEIGHT: float = 0.2
 
 arena: Arena = Arena()
 gui_callback = None
@@ -43,7 +42,19 @@ def goal_location(t: float) -> np.ndarray:
 
 def last_location(t: float) -> np.ndarray:
     global arena
+    if len(arena.player.positions) == 0:
+        return player_location(t)
     return np.array([arena.player.positions[-1].x, arena.player.positions[-1].y], dtype=np.float64)
+
+def delta_distance(t: float) -> np.ndarray:
+    tmp = player_location(t) - last_location(t)
+    tmp = np.array([-tmp[1], tmp[0], tmp[1], -tmp[0]], dtype=np.float64)
+    return np.maximum(tmp, np.zeros(4, dtype=np.float64))
+
+def goal_distance(t: float) -> np.ndarray:
+    tmp = player_location(t) - goal_location(t)
+    tmp = np.array([-tmp[1], tmp[0], tmp[1], -tmp[0]], dtype=np.float64)
+    return np.maximum(tmp, np.zeros(4, dtype=np.float64))
 
 # moves the player based on the movement vector (2D)
 # Process:
@@ -56,9 +67,9 @@ def move(t: float, x: np.ndarray):
         return
     print(f"Move at {round(t, 2)}")
 
-    global arena, player_moved, action_performed
+    global arena, player_moved, action_performed, rl_state
     index = int(np.argmax(x))
-    if math.isclose(x[index],0,rel_tol=1e-1):
+    if math.isclose(x[index],0):
         print(f"  No action selected")
         player_moved = False
         return
@@ -82,59 +93,35 @@ def move(t: float, x: np.ndarray):
     action_performed = True
         
 
-# Expand the error signal dimensions:
-#   Place the current state and previous state in the last 2 dimentions
+# Compute the error 4D from 12D input
+#    1: Delta Location
+#    2: Goal Distance
+#    3: Detection Distance
+# 
 def error(t: float, x: np.ndarray):
-    RL_MOVE_REWARD: float = -0.01
-    RL_MOVE_PUNISH: float = 0.001
-    RL_STOPPED_PUNISH: float = 0.002
-    RL_REPEATED_PUNISH: float = 0.01
-    global arena, last_action, player_moved, prev_state, rl_state, flipped
-    # Early return to only update error every ~1 second
-    if not math.isclose(t, int(t)):
-        return flipped * np.array([x[1], -x[0], -x[1], x[0]], dtype=np.float64) * rl_state
+    global MOVEMENT_WEIGHT, DIRECTION_WEIGHT
+    WEIGHT_ADJUSTMENT: float = 0.01
 
-    prev_state = rl_state # save the previous learning value
+    ll: np.ndarray = x[0:4]
+    gl: np.ndarray = x[4:8]
+    sd: np.ndarray = x[8:12]
 
-    # Punish moving into walls/not moving
-    if not player_moved:
-        rl_state += RL_STOPPED_PUNISH
+    if math.isclose(t,int(t)):
+        return gl + sd
 
-    # If the the player has travelled in a loop or is stuck on a wall
-    if len(arena.player.positions) > 8 and len(set(arena.player.positions[-8:])) == 1:
-        print("  Flipping")
-        arena.player.positions.clear() # Clear the positions to reset the count
-        #flipped *= -1 # invert the value of flipped
-        rl_state += RL_REPEATED_PUNISH # Punish the model for this action
-
-    # Compute reward/punishment for going in the right/wrong direction
-    if last_action == Direction.UP:
-        if arena.player.y > arena.goal.y:
-            rl_state += RL_MOVE_REWARD # Reward going towards the goal
-        else:
-            rl_state += RL_MOVE_PUNISH # Punish going away from the goal
-    elif last_action == Direction.DOWN:
-        if arena.player.y < arena.goal.y:
-            rl_state += RL_MOVE_REWARD
-        else:
-            rl_state += RL_MOVE_PUNISH
-    elif last_action == Direction.LEFT:
-        if arena.player.x > arena.goal.x:
-            rl_state += RL_MOVE_REWARD
-        else:
-            rl_state += RL_MOVE_PUNISH
-    elif last_action == Direction.LEFT:
-        if arena.player.x < arena.goal.x:
-            rl_state += RL_MOVE_REWARD
-        else:
-            rl_state += RL_MOVE_PUNISH
+    if last_action and np.argmax(sd) != int(last_action):
+        DIRECTION_WEIGHT += WEIGHT_ADJUSTMENT
+        MOVEMENT_WEIGHT -= WEIGHT_ADJUSTMENT
+    else:    
+        sd *= DIRECTION_WEIGHT
     
-    rl_state = max(0.01, rl_state)
+    if not ll.any(0):
+        MOVEMENT_WEIGHT += WEIGHT_ADJUSTMENT
+        DIRECTION_WEIGHT -= WEIGHT_ADJUSTMENT
+        gl *= MOVEMENT_WEIGHT
 
-    return flipped * np.array([x[1], -x[0], -x[1], x[0]], dtype=np.float64) * rl_state
-    # check if the agent is moving towards the goal based on {last_action}
-    # check that the {last_action} did not try to move the agent into a wall
-    # TODO future: check if the action have been performed repeatedly/looping
+    err = gl + sd
+    return err
 
 def step(t: float) -> np.ndarray:
     global arena
@@ -147,6 +134,12 @@ def limiter(t: float):
     if action_performed:
         action_performed = False
         return 1
+    return 0
+
+def shutoff(t: float, x) -> np.ndarray:
+    for val in x:
+        if val > 10:
+            return 1
     return 0
 
 def generate_grid_image(arena: Arena, block_size: int = 10):
@@ -185,14 +178,14 @@ with model:
         label='Distance Input Node'
     )
     cur_in = nengo.Node(
-        output=player_location,
+        output=delta_distance,
         size_out=error_dimensions,
-        label='Current Player Location Input',
+        label='Movement Change Input',
     )
     gol_in = nengo.Node(
-        output=goal_location,
+        output=goal_distance,
         size_out=error_dimensions,
-        label='Current Goal Location Input'
+        label='Goal Distance Input'
     )
     mov_out = nengo.Node(
         output=move,
@@ -201,13 +194,19 @@ with model:
     )
     err_tra = nengo.Node(
         output=error,
-        size_in=error_dimensions,
+        size_in=error_dimensions*3,
         size_out=output_dimensions,
-        label='Error Transform',
+        label='Error Compute',
     )
     shutoff_gate = nengo.Node(
         output=limiter,
         label='Shutoff Gate'
+    )
+    flush = nengo.Node(
+        output=shutoff,
+        size_in=output_dimensions,
+        size_out=output_dimensions,
+        label='Post Flush'
     )
 
     # Ensembles
@@ -264,32 +263,49 @@ with model:
     # Learning Connections
     conn_play_loc = nengo.Connection(
         pre=cur_in,
-        post=err,
-        label='Player Location -> Error Connection'
+        post=err_tra[0:4],
+        label='Location Delta -> Error Connection'
     )
     conn_goal_loc = nengo.Connection(
         pre=gol_in,
-        post=err,
+        post=err_tra[4:8],
         transform=-1,
-        label='Goal Location -> Error Connection'
+        label='Goal Distance -> Error Connection'
+    )
+    conn_dist_err = nengo.Connection(
+        pre=dist_in,
+        post=err_tra[8:12],
+        label='Detection Distance -> Error Connection'
     )
     conn_err_tra = nengo.Connection(
-        pre=err,
-        post=err_tra,
+        pre=err_tra,
+        post=err,
         label='Error Transformation Connection'
     )
     conn_learn = nengo.Connection(
-        pre=err_tra,
+        pre=err,
         post=conn_pre_post.learning_rule,
         label='Learning Connection'
     )
 
-    conn_shutoff = nengo.Connection(
-        pre=shutoff_gate, 
-        post=post.neurons, 
-        transform=-1000*np.ones((post.n_neurons, 1)), 
-        synapse=None,
-        label='Limiter'
+    # Reset Connections
+    # conn_shutoff = nengo.Connection(
+    #     pre=shutoff_gate, 
+    #     post=post.neurons, 
+    #     transform=-1000*np.ones((post.n_neurons, 1)), 
+    #     synapse=None,
+    #     label='Limiter'
+    # )
+    conn_flush_post = nengo.Connection(
+        pre=flush,
+        post=post.neurons,
+        transform=-1000000000*np.ones((post.n_neurons, 4)),
+        label='Flush -> Post',
+    )
+    conn_post_flush = nengo.Connection(
+        pre=post,
+        post=flush,
+        label='Post -> Flush',
     )
 
 if __name__ == '__main__':
