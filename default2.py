@@ -312,6 +312,7 @@ if __name__ == '__main__':
     import gui
     import time
     import dearpygui.dearpygui as dpg
+    import pause
 
     target_frame_rate = 30
 
@@ -328,61 +329,5 @@ if __name__ == '__main__':
             gui.update_grid(arena)
             dpg.render_dearpygui_frame()
             expected_end_time = start_time + (1.0 / target_frame_rate)
-            if time.time() < expected_end_time:
-                time.sleep(expected_end_time - time.time())
+            pause.until(expected_end_time)
     dpg.destroy_context()
-
-    # from gui import create_texture
-    # import time
-
-    # target_frame_rate = 30
-
-    # rows = 23
-    # columns = 23
-    # block_size: int = 10
-    # width = columns * block_size
-    # height = rows * block_size
-
-    # # Updates the grid text with the current state of the arena
-    # def update_grid(tag: str | int = 'Environment'):
-    #     global arena
-    #     texture_data: list[float] = []
-    #     _map: dict[int, list[float]] = {
-    #         Arena.EMPTY: [0, 0, 0, 0], # Black
-    #         Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
-    #         Arena.PLAYER: [255/ 255, 255 / 255, 0, 255/ 255], # Yellow
-    #         Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
-    #     }
-
-    #     for y in range(arena.m): # Every Y coordinate
-    #         for _ in range(block_size): # Every Y block
-    #             for x in range(arena.n): # Every X coordinate
-    #                 for _ in range(block_size): # Every X block
-    #                     # RGBA pixel format
-    #                     texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
-    #     dpg.set_value(item=tag, value=texture_data)
-
-    # dpg.create_context()
-    # dpg.create_viewport(title='Pacman [float]', width=width + 100, height=height + 100)
-    # dpg.setup_dearpygui()
-
-    # arena_texture: list[float] = create_texture(rows * block_size, columns * block_size)
-    # with dpg.texture_registry(show=False):
-    #     dpg.add_dynamic_texture(width=width, height=height, default_value=arena_texture, tag='Environment')
-    # update_grid()
-
-    # with dpg.window(tag="Pacman"):
-    #     dpg.add_image("Environment", width=width, height=height)
-
-    # dpg.show_viewport()
-    # dpg.set_primary_window("Pacman", True)
-    # with nengo.Simulator(model, seed=0, dt=(1.0/target_frame_rate)) as sim:
-    #     while dpg.is_dearpygui_running():
-    #         start_time = time.time()
-    #         sim.step()
-    #         update_grid()
-    #         dpg.render_dearpygui_frame()
-    #         expected_end_time = start_time + (1.0 / target_frame_rate)
-    #         if time.time() < expected_end_time:
-    #             time.sleep(expected_end_time - time.time())
-    # dpg.destroy_context()
