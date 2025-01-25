@@ -2,8 +2,8 @@ import math
 import nengo
 import nengo.networks
 import numpy as np
-import simulation
-from simulation import Arena
+import lib.simulation as simulation
+from lib.simulation import Arena
 
 arena = simulation.Arena()
 last_action: simulation.Direction = None

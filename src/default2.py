@@ -3,7 +3,7 @@
 import math
 import nengo
 import numpy as np
-from simulation import Arena, Direction, Point
+from lib.simulation import Arena, Direction, Point
 
 last_action: Direction = None
 player_moved: bool = True
@@ -309,12 +309,13 @@ with model:
     )
 
 if __name__ == '__main__':
-    import gui
+    import lib.gui as gui
     import time
     import dearpygui.dearpygui as dpg
     import pause
 
-    target_frame_rate = 30
+    target_frame_rate: int = 30
+    target_frame_time: float = 1.0/target_frame_rate
 
     gui.create_gui(arena)
     with nengo.Simulator(model, dt=(1.0/target_frame_rate)) as sim:
@@ -328,6 +329,6 @@ if __name__ == '__main__':
             dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265])
             gui.update_grid(arena)
             dpg.render_dearpygui_frame()
-            expected_end_time = start_time + (1.0 / target_frame_rate)
+            expected_end_time: float = start_time + target_frame_time
             pause.until(expected_end_time)
     dpg.destroy_context()
