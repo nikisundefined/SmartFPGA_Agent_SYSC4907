@@ -5,6 +5,8 @@ import numpy as np
 import lib.simulation as simulation
 from lib.simulation import Arena
 
+# NOTE: Old version of model before refactor
+
 arena = simulation.Arena()
 last_action: simulation.Direction = None
 ensemble_neurons = 100

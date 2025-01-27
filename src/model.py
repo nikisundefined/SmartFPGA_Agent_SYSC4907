@@ -96,11 +96,13 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         cvar.player_moved = False
         return
 
+    # Ensure the index is in range of the enum to prevent errors (TODO: unneeded?)
     if index < 0 or index > 3:
         raise IndexError(f'simulation.Direction: Index {index} out of range')
     tmp: Point = Point(cvar.arena.player.x, cvar.arena.player.y) # Store the old location
     cvar.arena.move(index)
 
+    # Check if the player has stopped moving and log it
     if cvar.player_moved and tmp == cvar.arena.player:
         log.info(f"  Player has stopped moving at {cvar.arena.player}")
     cvar.player_moved = tmp != cvar.arena.player
@@ -108,53 +110,70 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     log.debug(f"  Direction {Direction(index).name} {x}")
     log.info(f"  Player Location: {cvar.arena.player} | Goal Location: {cvar.arena.goal}")
 
+    # Update the goal location when the agent reaches the goal
     if cvar.arena.on_goal():
         log.info("  Agent reached the goal")
         cvar.arena.set_goal()
     cvar.action_performed = True
 
-### End Output Node Functions        
+### End Output Node Functions ###
 
+### Error Function ###
+
+# Calculates the error of the model inputs to outputs based on:
+# NOTE: Differences of points (e.g. Goal and Player) are given as the absolute distances in the 4 directions North, East, South, West (NESW)
+#   - The last location of the agent (LL)
+#   - The distance from the agent to the goal (GL)
+#   - The detection distance in all directions (SD)
 def error(t: float, x: np.ndarray, cvar: AttrDict = cvar):
-    WEIGHT_ADJUSTMENT: float = 0.01
+    WEIGHT_ADJUSTMENT: float = 0.01 # Amount to adjust error weights by
 
+    # Extract the inputs from the compressed input
     ll: np.ndarray = x[0:4]
     gl: np.ndarray = x[4:8]
     sd: np.ndarray = x[8:12]
 
+    # Only update the error weights every ~1 second
     if math.isclose(t,int(t)):
         return gl + sd
 
+    # Check if the agent is moving in the direction that has the most open space
     if cvar.last_action and np.argmax(sd) != int(cvar.last_action):
         cvar.direction_weight += WEIGHT_ADJUSTMENT
         cvar.movement_weight -= WEIGHT_ADJUSTMENT
     else:    
         sd *= cvar.direction_weight
     
+    # Check if the agent moved during the last action
     if not ll.any(0):
         cvar.movement_weight += WEIGHT_ADJUSTMENT
         cvar.direction_weight -= WEIGHT_ADJUSTMENT
         gl *= cvar.movement_weight
 
+    # Compute and return error
     err = gl + sd
     return err
 
-def step(t: float, cvar: AttrDict = cvar) -> np.ndarray:
-    return cvar.arena.detection().astype(np.float64)
+# Get the distance to a wall in every direction starting from the agent
+def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
+    return cvar.arena.detection().astype(cvar.dtype)
 
+# Returns 1 when an action has been performed (used to reset the post ensemble after taking an action)
 def limiter(t: float, cvar: AttrDict = cvar):
     if cvar.action_performed:
         cvar.action_performed = False
         return 1
     return 0
 
+# Returns 1 if any value in x is greater than 1 (used to prevent the value of post from becoming too large)
 def shutoff(t: float, x) -> np.ndarray:
     for val in x:
-        if val > 10:
+        if val > 1:
             return 1
     return 0
 
-def generate_grid_image(arena: Arena, block_size: int = 10, cvar: AttrDict = cvar):
+# Convert the current state of the arena into an RGBA pixel array
+def generate_grid_image(arena: Arena, block_size: int = 10):
     texture_data: list[float] = []
     _map: dict[int, list[float]] = {
         Arena.EMPTY: [0, 0, 0, 0], # Black
@@ -163,21 +182,15 @@ def generate_grid_image(arena: Arena, block_size: int = 10, cvar: AttrDict = cva
         Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
     }
 
-    for y in range(cvar.arena.m): # Every Y coordinate
+    for y in range(arena.m): # Every Y coordinate
         for _ in range(block_size): # Every Y block
-            for x in range(cvar.arena.n): # Every X coordinate
+            for x in range(arena.n): # Every X coordinate
                 for _ in range(block_size): # Every X block
                     # RGBA pixel format
-                    texture_data.extend(_map[cvar.arena.grid[y][x]]) # Pixel value
+                    texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
     return texture_data
 
-# Goal: choose the direction with the largest value in the direction of the goal
-# nparray with 4 random values (detection distance)
-# nparray with goal location
-# nparray with current location
-# error is computed as the differece in current and goal positions
-# want to choose the direction that has the largest value in the direction which minimizes error
-
+# Global model definition for use with NengoGUI
 model = nengo.Network(label='pacman')
 with model:
     bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
@@ -186,7 +199,7 @@ with model:
     # Nodes (interaction with simulation)
     # Detection distance input
     dist_in = nengo.Node(
-        output=step,
+        output=detection,
         size_out=cvar.input_dimensions,
         label='Distance Input Node'
     )
@@ -327,6 +340,7 @@ with model:
         label='Post -> Flush',
     )
 
+# Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
 def main():
     import lib.gui as gui
     import time
@@ -338,18 +352,18 @@ def main():
 
     gui.create_gui(cvar.arena)
     with nengo.Simulator(model, dt=(1.0/target_frame_rate)) as sim:
-        dpg.add_text(f"{sim.seed}", tag='seed', parent='Pacman')
+        dpg.add_text(f"{sim.seed}", tag='seed', parent='Pacman') # Add custom text box displaying simulator seed
         
-        gui.display_gui()
+        gui.display_gui() # Display GUI
         while dpg.is_dearpygui_running():
-            start_time = time.time()
-            sim.step()
-            gui.update_text()
-            dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265])
-            gui.update_grid(cvar.arena)
-            dpg.render_dearpygui_frame()
-            expected_end_time: float = start_time + target_frame_time
-            pause.until(expected_end_time)
+            start_time = time.time() # Capture the start of frame computation time
+            sim.step() # Perform one step of the simulaton
+            gui.update_text() # Update text boxes in the gui
+            dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265]) # Update custom text box added earlier
+            gui.update_grid(cvar.arena) # Update the arena representation inside the GUI
+            dpg.render_dearpygui_frame() # Render the updated frame to the GUI
+            expected_end_time: float = start_time + target_frame_time # Compute how long to wait for the next frame
+            pause.until(expected_end_time) # Wait until its time to render the next frame
     dpg.destroy_context()
 
 if __name__ == '__main__':
@@ -363,10 +377,12 @@ if __name__ == '__main__':
                 exit(2)
             if sys.argv.index('--log') == len(sys.argv) - 1:
                 logging.critical('Insufficient arguments for arg: --log')
-            level = sys.argv[sys.argv.index('--log') + 1]
-            if level.upper() not in logging._nameToLevel:
+            level = sys.argv[sys.argv.index('--log') + 1].upper()
+            if level not in logging._nameToLevel:
                 logging.critical(f'Unknown logging level: {level}')
             log.setLevel(level)
+            
+    # Catch any errors gracefully and exit
     try:
         main()
     except Exception as e:
