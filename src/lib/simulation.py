@@ -5,9 +5,17 @@ import math
 from enum import IntEnum
 
 class Point:
-    def todistance(self, dtype: np.dtype = np.float64) -> np.ndarray:
+    @classmethod
+    def fromvector(cls, vec: np.ndarray) -> 'Point':
+        assert vec.shape == (4,), f"Invalid shape for vector: {vec.shape}"
+        return cls(vec[1] - vec[3], vec[2] - vec[0])
+
+    def asmagnitude(self, dtype: np.dtype = np.float64) -> np.ndarray:
         tmp: np.ndarray = np.array([-self.y, self.x, self.y, -self.x], dtype=dtype)
         return np.maximum(tmp, np.zeros(tmp.shape))
+    
+    def distance(self, other: 'Point') -> float:
+        return math.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
 
     def __init__(self, x: int, y: int):
         self.x: int = x

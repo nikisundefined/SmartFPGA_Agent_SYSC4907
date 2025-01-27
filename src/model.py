@@ -25,7 +25,7 @@ class AttrDict:
     error_dimensions: int = 4 # Number of dimensions ouput from the error function
     dtype: np.dtype = np.float64 # The datatype used for all numpy arrays
 
-    rl_state: float = 1.0 # Reinforcement learning state
+    expected_reward: float = 0.0 # Last states expected reward
 
     movement_threshold: float = 1e-9 # The minimum value for an action to be selected
     movement_weight: float = 0.8 # Weight of movement on error
@@ -76,7 +76,7 @@ def delta_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
 # Return the distance between the player and the goal as a 4D Distance
 def goal_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     tmp: Point = cvar.arena.player - cvar.arena.goal
-    return tmp.todistance(dtype=cvar.dtype)
+    return tmp.asmagnitude(dtype=cvar.dtype)
 
 ### End Input Node Functions ###
 
@@ -154,6 +154,67 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     err = gl + sd
     return err
 
+def error_new(t: float, cvar: AttrDict = cvar):
+    """
+dis_to_goal = root((Xc-Xg)^2 + (Yx-Yg)^2)
+reward(t) = + goal_w * (previous_distance - dis_to_goal) if moved towards
+        - wall_w * wall_penalty              if hits wall
+        - goal_w * (dis_to_goal - previous_distance) if moves away 
+        0  if no change
+
+goal_w = scaling factor
+wall_w = scaling factor
+wall_penalty = binary variable (1/0)
+
+error calc:
+
+error = reward(t) + d_f * expected_reward_ns - expected_reward
+
+learning rate lr = 
+weight_update = lr * error * si(t) * sj(t)
+
+si = pre
+sj = post
+"""
+    d_f: float = 0.9 # Discount factor
+
+    def reward(player: Point, goal: Point, previous_position: Point, cvar: AttrDict = cvar):
+        GOAL_W: float = 0.7 # Weight of the goal
+        WALL_W: float = 0.6 # Weight of hitting the wall
+        WALL_PENALTY: float = 1.0 # The penalty for hitting a wall
+        # The current absolute distance to the goal
+        dis_to_goal: float = player.distance(goal)
+        # The previous distance to the goal
+        previous_distance: float = previous_position.distance(goal)
+        # Did the agent move towards the goal (absolute distance)
+        moved_towards_goal: bool = dis_to_goal < previous_distance
+        # Did the agent hit the wall (last action caused the agent to not move and move into a wall)
+        hit_wall: bool = player == previous_position # TODO: Validate this equation
+
+        reward: float = 0
+        if moved_towards_goal:
+            reward += GOAL_W * (previous_distance - dis_to_goal)
+        else:
+            reward -= GOAL_W * (dis_to_goal - previous_distance)
+        if hit_wall:
+            reward -= WALL_W * WALL_PENALTY
+        return reward
+    
+    # Error is given as the difference of reward values
+    error: float = reward(cvar.arena.player.point, cvar.arena.goal, cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point) + d_f * (cvar.expected_reward)
+
+    # Compute the expected reward of the next step
+    # The expected reward is based on if the agent was to to choose the best direction
+    goal_direction: np.ndarray = (cvar.arena.player - cvar.arena.goal).asmagnitude(cvar.dtype) # Compute which directions the goal is in
+    goal_distances: np.ndarray = cvar.arena.detection() * goal_direction # Isolate the distances from the detection
+    if (goal_distances == 0).all():
+        goal_distances = cvar.arena.detection()
+    best_direction: np.ndarray = np.zeros(4) # Find the best direction as a vector
+    best_direction[np.argmax(goal_distances)] = 1
+    best_direction = Point.fromvector(best_direction) # Convert the vector into a point for further math
+    cvar.expected_reward = reward(cvar.arena.player + best_direction, cvar.arena.goal, cvar.arena.player.point)
+    return error
+
 # Get the distance to a wall in every direction starting from the agent
 def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     return cvar.arena.detection().astype(cvar.dtype)
@@ -204,17 +265,17 @@ with model:
         label='Distance Input Node'
     )
     # Last location distance input
-    cur_in = nengo.Node(
-        output=delta_distance,
-        size_out=cvar.error_dimensions,
-        label='Movement Change Input',
-    )
+    # cur_in = nengo.Node(
+    #     output=delta_distance,
+    #     size_out=cvar.error_dimensions,
+    #     label='Movement Change Input',
+    # )
     # Goal distance input
-    gol_in = nengo.Node(
-        output=goal_distance,
-        size_out=cvar.error_dimensions,
-        label='Goal Distance Input'
-    )
+    # gol_in = nengo.Node(
+    #     output=goal_distance,
+    #     size_out=cvar.error_dimensions,
+    #     label='Goal Distance Input'
+    # )
     # Movement output
     mov_out = nengo.Node(
         output=move,
@@ -223,23 +284,23 @@ with model:
     )
     # Error computation Input/Output
     err_tra = nengo.Node(
-        output=error,
-        size_in=cvar.error_dimensions*3,
+        output=error_new,
+        # size_in=cvar.error_dimensions*3,
         size_out=cvar.output_dimensions,
         label='Error Compute',
     )
     # Post reset
-    shutoff_gate = nengo.Node(
-        output=limiter,
-        label='Shutoff Gate'
-    )
-    # Post reset
-    flush = nengo.Node(
-        output=shutoff,
-        size_in=cvar.output_dimensions,
-        size_out=cvar.output_dimensions,
-        label='Post Flush'
-    )
+    # shutoff_gate = nengo.Node(
+    #     output=limiter,
+    #     label='Shutoff Gate'
+    # )
+    # # Post reset
+    # flush = nengo.Node(
+    #     output=shutoff,
+    #     size_in=cvar.output_dimensions,
+    #     size_out=cvar.output_dimensions,
+    #     label='Post Flush'
+    # )
 
     # Ensembles
     pre = nengo.Ensemble(
@@ -265,7 +326,7 @@ with model:
     conn_dist_in = nengo.Connection(
         pre=dist_in,
         post=pre,
-        function=lambda x: x - 12,
+        function=lambda x: x / 23,
         label='Distance Input Connection',
     )
     conn_pre_post = nengo.Connection(
@@ -293,22 +354,22 @@ with model:
     )
 
     # Learning Connections
-    conn_play_loc = nengo.Connection(
-        pre=cur_in,
-        post=err_tra[0:4],
-        label='Location Delta -> Error Connection'
-    )
-    conn_goal_loc = nengo.Connection(
-        pre=gol_in,
-        post=err_tra[4:8],
-        transform=-1,
-        label='Goal Distance -> Error Connection'
-    )
-    conn_dist_err = nengo.Connection(
-        pre=dist_in,
-        post=err_tra[8:12],
-        label='Detection Distance -> Error Connection'
-    )
+    # conn_play_loc = nengo.Connection(
+    #     pre=cur_in,
+    #     post=err_tra[0:4],
+    #     label='Location Delta -> Error Connection'
+    # )
+    # conn_goal_loc = nengo.Connection(
+    #     pre=gol_in,
+    #     post=err_tra[4:8],
+    #     transform=-1,
+    #     label='Goal Distance -> Error Connection'
+    # )
+    # conn_dist_err = nengo.Connection(
+    #     pre=dist_in,
+    #     post=err_tra[8:12],
+    #     label='Detection Distance -> Error Connection'
+    # )
     conn_err_tra = nengo.Connection(
         pre=err_tra,
         post=err,
@@ -328,17 +389,17 @@ with model:
     #     synapse=None,
     #     label='Limiter'
     # )
-    conn_flush_post = nengo.Connection(
-        pre=flush,
-        post=post.neurons,
-        transform=-1000000000*np.ones((post.n_neurons, 4)),
-        label='Flush -> Post',
-    )
-    conn_post_flush = nengo.Connection(
-        pre=post,
-        post=flush,
-        label='Post -> Flush',
-    )
+    # conn_flush_post = nengo.Connection(
+    #     pre=flush,
+    #     post=post.neurons,
+    #     transform=-1000000000*np.ones((post.n_neurons, 4)),
+    #     label='Flush -> Post',
+    # )
+    # conn_post_flush = nengo.Connection(
+    #     pre=post,
+    #     post=flush,
+    #     label='Post -> Flush',
+    # )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
 def main():
@@ -364,6 +425,7 @@ def main():
             dpg.render_dearpygui_frame() # Render the updated frame to the GUI
             expected_end_time: float = start_time + target_frame_time # Compute how long to wait for the next frame
             pause.until(expected_end_time) # Wait until its time to render the next frame
+        log.debug(f'Simulator ran: {sim.n_steps} steps')
     dpg.destroy_context()
 
 if __name__ == '__main__':
@@ -381,7 +443,9 @@ if __name__ == '__main__':
             if level not in logging._nameToLevel:
                 logging.critical(f'Unknown logging level: {level}')
             log.setLevel(level)
-            
+
+    print(error_new(0))
+
     # Catch any errors gracefully and exit
     try:
         main()
