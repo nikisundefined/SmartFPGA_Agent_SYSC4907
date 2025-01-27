@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import random
 import math
 from enum import IntEnum
 
 class Point:
+    def todistance(self, dtype: np.dtype = np.float64) -> np.ndarray:
+        tmp: np.ndarray = np.array([-self.y, self.x, self.y, -self.x], dtype=dtype)
+        return np.maximum(tmp, np.zeros(tmp.shape))
+
     def __init__(self, x: int, y: int):
         self.x: int = x
         self.y: int = y
+    
+    def __add__(self, other: 'Point') -> 'Point':
+        return Point(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other: 'Point') -> 'Point':
+        return Point(self.x - other.x, self.y - other.y)
 
     def __lt__(self, other: 'Point') -> bool:
         return self.x < other.x or self.y < other.y
@@ -27,6 +36,12 @@ class Point:
     
     def __repr__(self) -> str:
         return f"({self.x},{self.y})"
+
+    def __json__(self) -> dict[str]:
+        return {
+            'x': self.x,
+            'y': self.y
+        }
         
 class Direction(IntEnum):
     UP = 0
@@ -36,11 +51,11 @@ class Direction(IntEnum):
 
 class Player:
     @classmethod
-    def frompoint(cls, p: Point) -> 'Point':
+    def frompoint(cls, p: Point) -> 'Player':
         return cls(p.x, p.y, 0, [])
     
     @classmethod
-    def fromcoordinate(cls, x: int, y: int) -> 'Point':
+    def fromcoordinate(cls, x: int, y: int) -> 'Player':
         return cls(x, y, 0, [])
 
     def __init__(self, x: int, y: int, score: int, positions: list[Point]):
@@ -59,11 +74,24 @@ class Player:
             case int(Direction.RIGHT):
                 self.x += 1
     
+    def __add__(self, other: Point) -> Point:
+        return Point(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other: Point) -> Point:
+        return Point(self.x - other.x, self.y - other.y)
+
     def collect_goal(self):
         self.score += 100
     
     def __str__(self) -> str:
         return str(self.point)
+
+    def __json__(self) -> dict[str]:
+        return {
+            'point': self.point.__json__(),
+            'score': self.score,
+            'positions': [x.__json__() for x in self.positions]
+        }
 
     @property
     def x(self) -> int:
@@ -96,6 +124,15 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
+    
+    def __json__(self) -> dict[str]:
+        return {
+            'n': self.n,
+            'm': self.m,
+            'player': self.player.__json__(),
+            'goal': self.goal.__json__(),
+            'grid': self.grid.tolist(),
+        }
     
     @classmethod
     def _create_grid(cls) -> np.ndarray:
