@@ -3,6 +3,7 @@
 import math
 import json
 import logging
+import sys
 import nengo
 import nengo.learning_rules
 import nengo.neurons
@@ -50,6 +51,7 @@ class AttrDict:
 # Setup the variables for the model
 cvar: AttrDict = AttrDict()
 log = logging.getLogger('simulation')
+logging.basicConfig(level=logging.INFO)
 
 ### Input Node Functions ###
 
@@ -156,25 +158,25 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 
 def error_new(t: float, cvar: AttrDict = cvar):
     """
-dis_to_goal = root((Xc-Xg)^2 + (Yx-Yg)^2)
-reward(t) = + goal_w * (previous_distance - dis_to_goal) if moved towards
-        - wall_w * wall_penalty              if hits wall
-        - goal_w * (dis_to_goal - previous_distance) if moves away 
-        0  if no change
+    dis_to_goal = root((Xc-Xg)^2 + (Yx-Yg)^2)
+    reward(t) = + goal_w * (previous_distance - dis_to_goal) if moved towards
+            - wall_w * wall_penalty              if hits wall
+            - goal_w * (dis_to_goal - previous_distance) if moves away 
+            0  if no change
 
-goal_w = scaling factor
-wall_w = scaling factor
-wall_penalty = binary variable (1/0)
+    goal_w = scaling factor
+    wall_w = scaling factor
+    wall_penalty = binary variable (1/0)
 
-error calc:
+    error calc:
 
-error = reward(t) + d_f * expected_reward_ns - expected_reward
+    error = reward(t) + d_f * expected_reward_ns - expected_reward
 
-learning rate lr = 
-weight_update = lr * error * si(t) * sj(t)
+    learning rate lr = 
+    weight_update = lr * error * si(t) * sj(t)
 
-si = pre
-sj = post
+    si = pre
+    sj = post
 """
     d_f: float = 0.9 # Discount factor
 
@@ -234,8 +236,11 @@ def shutoff(t: float, x) -> np.ndarray:
     return 0
 
 # Convert the current state of the arena into an RGBA pixel array
-def generate_grid_image(arena: Arena, block_size: int = 10):
-    texture_data: list[float] = []
+def generate_grid_image(arena: Arena, block_size: int = 10) -> np.ndarray:
+    if not hasattr(generate_grid_image, 'shape'):
+        generate_grid_image.__setattr__('shape', (3, arena.n * block_size, arena.m * block_size))
+    #TODO: return numpy 3DD array of image of arena grid
+    texture_data: np.ndarray = np.zeros(generate_grid_image.shape)
     _map: dict[int, list[float]] = {
         Arena.EMPTY: [0, 0, 0, 0], # Black
         Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
@@ -264,18 +269,6 @@ with model:
         size_out=cvar.input_dimensions,
         label='Distance Input Node'
     )
-    # Last location distance input
-    # cur_in = nengo.Node(
-    #     output=delta_distance,
-    #     size_out=cvar.error_dimensions,
-    #     label='Movement Change Input',
-    # )
-    # Goal distance input
-    # gol_in = nengo.Node(
-    #     output=goal_distance,
-    #     size_out=cvar.error_dimensions,
-    #     label='Goal Distance Input'
-    # )
     # Movement output
     mov_out = nengo.Node(
         output=move,
@@ -289,18 +282,6 @@ with model:
         size_out=cvar.output_dimensions,
         label='Error Compute',
     )
-    # Post reset
-    # shutoff_gate = nengo.Node(
-    #     output=limiter,
-    #     label='Shutoff Gate'
-    # )
-    # # Post reset
-    # flush = nengo.Node(
-    #     output=shutoff,
-    #     size_in=cvar.output_dimensions,
-    #     size_out=cvar.output_dimensions,
-    #     label='Post Flush'
-    # )
 
     # Ensembles
     pre = nengo.Ensemble(
@@ -354,22 +335,6 @@ with model:
     )
 
     # Learning Connections
-    # conn_play_loc = nengo.Connection(
-    #     pre=cur_in,
-    #     post=err_tra[0:4],
-    #     label='Location Delta -> Error Connection'
-    # )
-    # conn_goal_loc = nengo.Connection(
-    #     pre=gol_in,
-    #     post=err_tra[4:8],
-    #     transform=-1,
-    #     label='Goal Distance -> Error Connection'
-    # )
-    # conn_dist_err = nengo.Connection(
-    #     pre=dist_in,
-    #     post=err_tra[8:12],
-    #     label='Detection Distance -> Error Connection'
-    # )
     conn_err_tra = nengo.Connection(
         pre=err_tra,
         post=err,
@@ -380,26 +345,6 @@ with model:
         post=conn_pre_post.learning_rule,
         label='Learning Connection'
     )
-
-    # Reset Connections
-    # conn_shutoff = nengo.Connection(
-    #     pre=shutoff_gate, 
-    #     post=post.neurons, 
-    #     transform=-1000*np.ones((post.n_neurons, 1)), 
-    #     synapse=None,
-    #     label='Limiter'
-    # )
-    # conn_flush_post = nengo.Connection(
-    #     pre=flush,
-    #     post=post.neurons,
-    #     transform=-1000000000*np.ones((post.n_neurons, 4)),
-    #     label='Flush -> Post',
-    # )
-    # conn_post_flush = nengo.Connection(
-    #     pre=post,
-    #     post=flush,
-    #     label='Post -> Flush',
-    # )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
 def main():
@@ -418,7 +363,7 @@ def main():
         gui.display_gui() # Display GUI
         while dpg.is_dearpygui_running():
             start_time = time.time() # Capture the start of frame computation time
-            sim.step() # Perform one step of the simulaton
+            sim.run(target_frame_time) # Perform one step of the simulaton
             gui.update_text() # Update text boxes in the gui
             dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265]) # Update custom text box added earlier
             gui.update_grid(cvar.arena) # Update the arena representation inside the GUI
@@ -429,22 +374,18 @@ def main():
     dpg.destroy_context()
 
 if __name__ == '__main__':
-    import sys
-    logging.basicConfig(level=logging.INFO)
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
         if '--log' in sys.argv:
             if len(sys.argv) < 3:
-                logging.critical('Insufficient arguments for arg: --log')
+                log.critical('Insufficient arguments for arg: --log')
                 exit(2)
             if sys.argv.index('--log') == len(sys.argv) - 1:
-                logging.critical('Insufficient arguments for arg: --log')
+                log.critical('Insufficient arguments for arg: --log')
             level = sys.argv[sys.argv.index('--log') + 1].upper()
             if level not in logging._nameToLevel:
-                logging.critical(f'Unknown logging level: {level}')
+                log.critical(f'Unknown logging level: {level}')
             log.setLevel(level)
-
-    print(error_new(0))
 
     # Catch any errors gracefully and exit
     try:
@@ -452,3 +393,9 @@ if __name__ == '__main__':
     except Exception as e:
         log.critical(f"ERROR: {e}", exc_info=1)
         exit(1)
+
+if '__page__' in locals():
+    log = nengo.logger
+    log.setLevel('INFO')
+    print('Setting up for NengoGUI')
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
