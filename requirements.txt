@@ -1,5 +1,7 @@
+astar==0.99
 dearpygui==2.0.0
-matplotlib==3.9.3
+matplotlib==3.10.0
 munkres==1.1.4
-zstandard==0.23.0
 pause==0.3
+sortedcontainers==2.4.0
+zstandard==0.23.0
