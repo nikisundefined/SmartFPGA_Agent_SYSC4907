@@ -1,6 +1,7 @@
 import lib.simulation as simulation
 import dearpygui.dearpygui as dpg
 import time
+import numpy as np
 
 def create_texture(n: int, m: int) -> list[float]:
     texture_data: list[float] = []
@@ -11,9 +12,17 @@ def create_texture(n: int, m: int) -> list[float]:
         texture_data.append(255 / 255)
     return texture_data
 
+def fill_tile(grid: np.ndarray, x: int, y: int, color: list[float], block_size: int = 10) -> None:
+    assert len(grid.shape) == 3, "Invalid input shape for fill operation"
+    assert grid.shape[2] == len(color), "Invalid depth for color given"
+    for ox in range(block_size):
+        for oy in range(block_size):
+            grid[y + oy][x + ox] = np.array(color)
+
 # Updates the grid text with the current state of the arena
 def update_grid(arena: simulation.Arena, block_size: int = 10, tag: str | int = 'Environment'):
     texture_data: list[float] = []
+    PATH_COLOR: list[float] = [255 / 255, 0, 0, 255 / 255] # Color of the path
     _map: dict[int, list[float]] = {
         simulation.Arena.EMPTY: [0, 0, 0, 0], # Black
         simulation.Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
@@ -21,12 +30,16 @@ def update_grid(arena: simulation.Arena, block_size: int = 10, tag: str | int = 
         simulation.Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
     }
 
+    path = arena.distance()
     for y in range(arena.m): # Every Y coordinate
-        for _ in range(block_size): # Every Y block
+        for oy in range(block_size): # Every Y block
             for x in range(arena.n): # Every X coordinate
-                for _ in range(block_size): # Every X block
-                    # RGBA pixel format
-                    texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
+                for ox in range(block_size): # Every X block
+                    if simulation.Point(x, y) in path and arena.grid[y][x] == simulation.Arena.EMPTY and (ox > 2 and ox < 8) and (oy > 2 and oy < 8):
+                        texture_data.extend(PATH_COLOR)
+                    else:
+                        # RGBA pixel format
+                        texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
     dpg.set_value(item=tag, value=texture_data)
 
 def move(sender, app_data, user_data: simulation.Direction):
@@ -36,6 +49,11 @@ def move(sender, app_data, user_data: simulation.Direction):
         arena.set_goal()
         dpg.set_value('score', f'Score: {arena.player.score}')
     update_grid(arena)
+    try:
+        print(arena.detection())
+    except:
+        print(f"DEBUG: {arena.player}")
+        print(f"DEBUG: {arena}")
 
 def create_gui(arena: simulation.Arena, rows: int = 23, columns = 23, block_size: int = 10):
     VIEWPORT_WIDTH: int = round((rows * block_size) / 100.0 + 0.5) * 100

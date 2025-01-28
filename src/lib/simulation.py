@@ -3,8 +3,9 @@
 import numpy as np
 import math
 import astar
-from typing import Union, Iterable
+from typing import Union
 from enum import IntEnum
+from PIL import Image
 
 class Point:
     @classmethod
@@ -18,6 +19,9 @@ class Point:
     
     def distance(self, other: 'Point') -> float:
         return math.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
+    
+    def copy(self) -> 'Point':
+        return Point(self.x, self.y)
 
     def __init__(self, x: int, y: int):
         self.x: int = x
@@ -41,7 +45,7 @@ class Point:
         return self.x == value.x and self.y == value.y
     
     def __hash__(self):
-        return hash((self.x - self.y) * (self.x * self.y))
+        return hash(str(self))
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -88,6 +92,9 @@ class Player:
         self.point: Point = Point(x, y)
         self.score: int = score
         self.positions: list[Point] = positions
+
+    def copy(self) -> 'Player':
+        return Player(self.point.x, self.point.y, self.score, self.positions.copy())
     
     def move(self, dir: Direction):
         match int(dir):
@@ -118,6 +125,9 @@ class Player:
             'score': self.score,
             'positions': [x.__json__() for x in self.positions]
         }
+
+    def __hash__(self):
+        return hash(str(self.__json__()))
 
     @property
     def x(self) -> int:
@@ -150,6 +160,7 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
+        self.path: list[Point] | None = None
     
     def __json__(self) -> dict[str]:
         return {
@@ -248,6 +259,9 @@ class Arena:
         # Update the grid to display the players location
         self.grid[self.player.y][self.player.x] = self.PLAYER
 
+        # Clear the path cache as the player has moved
+        self.path = None
+
     def set_goal(self) -> None:
         """Change the location of the goal. Should ony be called after Arena.on_goal() returns True"""
         # Clear the goal from the grid
@@ -269,53 +283,70 @@ class Arena:
     def detection(self) -> np.ndarray:
         """Returns the open space in the directions North, East, South, West"""
         # Scan out from the player in a direction until you hit a wall
-        dist_up = 0
-        while self._tile(self.player, offset_y=dist_up-1) != self.WALL:
-            dist_up += 1
 
-        dist_down = 0
-        while self._tile(self.player, offset_y=dist_down+1) != self.WALL:
+        dist_up: int = 0
+        while self._tile(self.player, offset_y=-dist_up) != self.WALL:
+            dist_up += 1
+        
+        dist_down: int = 0
+        while self._tile(self.player, offset_y=dist_down) != self.WALL:
             dist_down += 1
 
-        dist_left = 0
-        wrap_offset_left = 0
-        while self._tile(self.player, offset_x=dist_left-1) != self.WALL:
+        tmp_pnt: Point = self.player.point.copy()
+        dist_left: int = 0
+        while self._tile(tmp_pnt, offset_x=-dist_left) != self.WALL:
             dist_left += 1
-
-        dist_right = 0
-        wrap_offset_right = 0
-        while self._tile(self.player, offset_x=dist_right+1) != self.WALL:
+            if tmp_pnt.x - dist_left < 0:
+                tmp_pnt.x = 23
+        
+        tmp_pnt: Point = self.player.point.copy()
+        dist_right: int = 0
+        while self._tile(tmp_pnt, offset_x=dist_right) != self.WALL:
             dist_right += 1
-
-        return np.array([dist_up, dist_right, dist_down, dist_left], np.float64)
+            if tmp_pnt.x + dist_right >= self.n:
+                tmp_pnt.x = 0
+    
+        return np.array([dist_up, dist_right, dist_down, dist_left], np.float64) - np.ones(4)
     
     # The absolute distance from the player to the goal
     def absolute_distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
     
     # The distance between two points in the grid using the A* algorithm
-    def distance(self, start: Point | None = None, end: Point | None = None) -> Iterable[Point] | None:
+    def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
+        # If the path between the player and goal has been cached return that instead
+        if start is None and end is None and self.path is not None:
+            return self.path.copy()
+        
+        # Set defaults for the start and end positions
         if start is None:
             start = self.player.point
         if end is None:
             end = self.goal
 
+        # Define function to calculate neighbors of points
         def neighbors(p: Point, arena: 'Arena' = self) -> list[Point]:
+            # All direct neighbor points
             points: list[Point] = [Direction(i).topoint() for i in range(4)]
             ret: list[Point] = []
             for _p in points:
+                # If point is inbounds and not a wall, add it to the list
                 new_p: Point = _p + p
-                if new_p.x < 0 or new_p.x > arena.n:
+                if new_p.x < 0 or new_p.x >= arena.n:
                     continue
-                if new_p.y < 0 or new_p.y > arena.m:
+                if new_p.y < 0 or new_p.y >= arena.m:
                     continue
                 if arena.grid[new_p.y][new_p.x] != Arena.WALL:
                     ret.append(new_p)
             return ret
 
         tmp = astar.find_path(start, end, neighbors_fnct=neighbors)
+        # Convert iterator to list of points
         if tmp is not None:
             tmp = [p for p in tmp]
+        # Update the path cache
+        if self.path is None and start == self.player.point and end == self.goal:
+            self.path = tmp
         return tmp
     
     def __str__(self) -> str:
@@ -333,8 +364,49 @@ class Arena:
             s += "\n"
         return s
 
-    def display(self, block_size: int = 10, wall_color: int = 0x0000FFFF, player_color: int = 0xFFFF00FF, goal_color: int = 0x00FF00FF) -> np.ndarray:
-        pass # TODO: implement
+    def display(self, block_size: int = 10, wall_color: list[float] | None = None, player_color: list[float] | None = None, goal_color: list[float] | None = None) -> np.ndarray:
+        COLOR_DEPTH: int = 4
+        if wall_color is None:
+            wall_color = [0, 0, 255 / 255, 255 / 255]
+        if player_color is None:
+            player_color = [255 / 255, 255 / 255, 0, 255 / 255]
+        if goal_color is None:
+            goal_color = [0, 255 / 255, 0, 255 / 255]
+
+        wall_color:   np.ndarray = np.array(wall_color, dtype=np.float32)
+        player_color: np.ndarray = np.array(player_color, dtype=np.float32)
+        goal_color:   np.ndarray = np.array(goal_color, dtype=np.float32)
+
+        if max(wall_color) > 255:
+            wall_color /= 255
+        if max(player_color) > 255:
+            player_color /= 255
+        if max(goal_color) > 255:
+            goal_color /= 255
+        
+        texture_data: np.ndarray = np.zeros((self.n * block_size, self.m * block_size, COLOR_DEPTH))
+        PATH_COLOR: np.ndarray = np.array([255 / 255, 0, 0, 255 / 255], dtype=np.float32)
+        _map: dict[int, list[float]] = {
+            Arena.EMPTY: np.array([0, 0, 0,0], dtype=np.float32), # Black
+            Arena.WALL: wall_color, # Blue
+            Arena.PLAYER: player_color, # Yellow
+            Arena.GOAL: goal_color, # Green
+        }
+        path: list[Point] = self.distance()
+
+        for y in range(self.m):
+            for oy in range(block_size):
+                for x in range(self.n):
+                    for ox in range(block_size):
+                        coord_y: int = y * block_size + oy
+                        coord_x: int = x * block_size + ox
+                        if Point(x, y) in path and self.grid[y][x] == Arena.EMPTY and (ox > 2 and ox < 8) and (oy > 2 and oy < 8):
+                            texture_data[coord_y][coord_x] = PATH_COLOR
+                        else:
+                            texture_data[coord_y][coord_x] = _map[self.grid[y][x]]
+        texture_data *= 255
+        texture_data = texture_data.astype(np.uint8)
+        return texture_data
 
 def main():
     while key != 'q':

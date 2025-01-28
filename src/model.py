@@ -34,6 +34,7 @@ class AttrDict:
 
     arena: Arena = Arena() # The arena the agent with move within
     action_performed: bool = False # Was an action performed by the agent since the last action
+    in_gui: bool = False # In the simulation running in the nengo gui
     
     def export(self) -> str:
         class JsonEncoder(json.JSONEncoder):
@@ -51,7 +52,6 @@ class AttrDict:
 # Setup the variables for the model
 cvar: AttrDict = AttrDict()
 log = logging.getLogger('simulation')
-logging.basicConfig(level=logging.INFO)
 
 ### Input Node Functions ###
 
@@ -117,6 +117,14 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         log.info("  Agent reached the goal")
         cvar.arena.set_goal()
     cvar.action_performed = True
+
+    if cvar.in_gui:
+        from PIL import Image
+        arr = cvar.arena.display()
+        if arr is None:
+            return
+        img = Image.fromarray()
+        img.save("arena.png")
 
 ### End Output Node Functions ###
 
@@ -202,38 +210,20 @@ def error_new(t: float, cvar: AttrDict = cvar):
             reward -= WALL_W * WALL_PENALTY
         return reward
     
+    path: list[Point] = cvar.arena.distance() # Compute the shortest path to the goal
+    expected_reward_ns: float = reward(path[0], cvar.arena.goal, cvar.arena.player.point)
     # Error is given as the difference of reward values
-    error: float = reward(cvar.arena.player.point, cvar.arena.goal, cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point) + d_f * (cvar.expected_reward)
-
-    # Compute the expected reward of the next step
-    # The expected reward is based on if the agent was to to choose the best direction
-    goal_direction: np.ndarray = (cvar.arena.player - cvar.arena.goal).asmagnitude(cvar.dtype) # Compute which directions the goal is in
-    goal_distances: np.ndarray = cvar.arena.detection() * goal_direction # Isolate the distances from the detection
-    if (goal_distances == 0).all():
-        goal_distances = cvar.arena.detection()
-    best_direction: np.ndarray = np.zeros(4) # Find the best direction as a vector
-    best_direction[np.argmax(goal_distances)] = 1
-    best_direction = Point.fromvector(best_direction) # Convert the vector into a point for further math
-    cvar.expected_reward = reward(cvar.arena.player + best_direction, cvar.arena.goal, cvar.arena.player.point)
+    error: float = reward(
+            cvar.arena.player.point, 
+            cvar.arena.goal, 
+            cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
+        ) + d_f * (expected_reward_ns - cvar.expected_reward)
+    cvar.expected_reward = expected_reward_ns # Store the expected reward for the next step
     return error
 
 # Get the distance to a wall in every direction starting from the agent
 def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     return cvar.arena.detection().astype(cvar.dtype)
-
-# Returns 1 when an action has been performed (used to reset the post ensemble after taking an action)
-def limiter(t: float, cvar: AttrDict = cvar):
-    if cvar.action_performed:
-        cvar.action_performed = False
-        return 1
-    return 0
-
-# Returns 1 if any value in x is greater than 1 (used to prevent the value of post from becoming too large)
-def shutoff(t: float, x) -> np.ndarray:
-    for val in x:
-        if val > 1:
-            return 1
-    return 0
 
 # Convert the current state of the arena into an RGBA pixel array
 def generate_grid_image(arena: Arena, block_size: int = 10) -> np.ndarray:
@@ -353,17 +343,20 @@ def main():
     import dearpygui.dearpygui as dpg
     import pause
 
+    nengo.logger.setLevel('WARNING')
+
     target_frame_rate: int = 30
     target_frame_time: float = 1.0/target_frame_rate
 
     gui.create_gui(cvar.arena)
-    with nengo.Simulator(model, dt=(1.0/target_frame_rate)) as sim:
+    with nengo.Simulator(model, dt=(1.0/target_frame_rate), progress_bar=False) as sim:
         dpg.add_text(f"{sim.seed}", tag='seed', parent='Pacman') # Add custom text box displaying simulator seed
         
         gui.display_gui() # Display GUI
+        log.info(f'Starting simulator with seed: {sim.seed}')
         while dpg.is_dearpygui_running():
             start_time = time.time() # Capture the start of frame computation time
-            sim.run(target_frame_time) # Perform one step of the simulaton
+            sim.run_steps(int(1/sim.dt)) # Perform one frame of the simulaton
             gui.update_text() # Update text boxes in the gui
             dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265]) # Update custom text box added earlier
             gui.update_grid(cvar.arena) # Update the arena representation inside the GUI
@@ -374,9 +367,33 @@ def main():
     dpg.destroy_context()
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
-        if '--log' in sys.argv:
+        if '--gui' in sys.argv:
+            import os
+            import lib.gui as gui
+            import dearpygui.dearpygui as dpg
+
+            ARENA_FILE: str = "arena.png"
+            if not os.path.exists(ARENA_FILE):
+                print("Waiting for simulation to start")
+                while not os.path.exists(ARENA_FILE):
+                    pass
+                print("Simulation started")
+            
+            gui.create_gui(cvar.arena)
+            while dpg.is_dearpygui_running():
+                time = os.path.getmtime(ARENA_FILE)
+                while time == os.path.getmtime(ARENA_FILE):
+                    pass
+                width, height, channels, data = dpg.load_image(ARENA_FILE)
+                dpg.set_value('Environment', data)
+                dpg.render_dearpygui_frame()
+            if os.path.exists(ARENA_FILE):
+                os.remove(ARENA_FILE)
+            dpg.destroy_context()
+        elif '--log' in sys.argv:
             if len(sys.argv) < 3:
                 log.critical('Insufficient arguments for arg: --log')
                 exit(2)
@@ -395,6 +412,7 @@ if __name__ == '__main__':
         exit(1)
 
 if '__page__' in locals():
+    cvar.in_gui = True # Indicate that the script is run in nengo gui
     log = nengo.logger
     log.setLevel('INFO')
     print('Setting up for NengoGUI')
