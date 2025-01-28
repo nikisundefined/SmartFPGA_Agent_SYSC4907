@@ -2,6 +2,8 @@
 
 import numpy as np
 import math
+import astar
+from typing import Union, Iterable
 from enum import IntEnum
 
 class Point:
@@ -21,7 +23,9 @@ class Point:
         self.x: int = x
         self.y: int = y
     
-    def __add__(self, other: 'Point') -> 'Point':
+    def __add__(self, other: Union['Point', 'Direction', 'Player']) -> 'Point':
+        if other is Direction:
+            return self + other.topoint()
         return Point(self.x + other.x, self.y + other.y)
 
     def __sub__(self, other: 'Point') -> 'Point':
@@ -56,6 +60,20 @@ class Direction(IntEnum):
     RIGHT = 1
     DOWN = 2
     LEFT = 3
+
+    def tovector(self) -> np.ndarray:
+        match self:
+            case self.UP:
+                return np.array([1, 0, 0, 0])
+            case self.RIGHT:
+                return np.array([0, 1, 0, 0])
+            case self.DOWN:
+                return np.array([0, 0, 1, 0])
+            case self.LEFT:
+                return np.array([0, 0, 0, 1])
+    
+    def topoint(self) -> Point:
+        return Point.fromvector(self.tovector())
 
 class Player:
     @classmethod
@@ -272,8 +290,33 @@ class Arena:
         return np.array([dist_up, dist_right, dist_down, dist_left], np.float64)
     
     # The absolute distance from the player to the goal
-    def distance(self) -> float:
+    def absolute_distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
+    
+    # The distance between two points in the grid using the A* algorithm
+    def distance(self, start: Point | None = None, end: Point | None = None) -> Iterable[Point] | None:
+        if start is None:
+            start = self.player.point
+        if end is None:
+            end = self.goal
+
+        def neighbors(p: Point, arena: 'Arena' = self) -> list[Point]:
+            points: list[Point] = [Direction(i).topoint() for i in range(4)]
+            ret: list[Point] = []
+            for _p in points:
+                new_p: Point = _p + p
+                if new_p.x < 0 or new_p.x > arena.n:
+                    continue
+                if new_p.y < 0 or new_p.y > arena.m:
+                    continue
+                if arena.grid[new_p.y][new_p.x] != Arena.WALL:
+                    ret.append(new_p)
+            return ret
+
+        tmp = astar.find_path(start, end, neighbors_fnct=neighbors)
+        if tmp is not None:
+            tmp = [p for p in tmp]
+        return tmp
     
     def __str__(self) -> str:
         s: str = ""
@@ -291,15 +334,9 @@ class Arena:
         return s
 
     def display(self, block_size: int = 10, wall_color: int = 0x0000FFFF, player_color: int = 0xFFFF00FF, goal_color: int = 0x00FF00FF) -> np.ndarray:
-        pass
+        pass # TODO: implement
 
-if __name__ == "__main__":
-    n = 23 # X length
-    m = 23 # Y length
-    arena = Arena(n, m)
-    grid = arena.grid
-    key: str = ""
-
+def main():
     while key != 'q':
         print(arena)
         #arena.display()
@@ -319,3 +356,21 @@ if __name__ == "__main__":
             print("Player has reached the goal")
             arena.set_goal()
             print(f"Goal is now located at: ({arena.goal.x}, {arena.goal.y})")
+
+if __name__ == "__main__":
+    import sys
+    n = 23 # X length
+    m = 23 # Y length
+    arena = Arena(n, m)
+    grid = arena.grid
+    key: str = ""
+
+    dist = [p for p in arena.distance()]
+    print(f'Path length: {len(dist)}')
+    print('Path taken: ')
+    for s in dist:
+        print(f"  {s}")
+
+
+    if len(sys.argv) > 1 and sys.argv[1] == '-i':
+        main()
