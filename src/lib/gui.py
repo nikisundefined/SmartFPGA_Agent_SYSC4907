@@ -1,4 +1,4 @@
-import lib.simulation as simulation
+import simulation as simulation
 import dearpygui.dearpygui as dpg
 import time
 import numpy as np

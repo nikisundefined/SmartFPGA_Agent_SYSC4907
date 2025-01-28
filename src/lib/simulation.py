@@ -227,6 +227,9 @@ class Arena:
         # Reset the tile on the grid incase we move the player
         self.grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
 
+        # Keep a copy of the old position incase we need to 
+        # player_old_pos: Point = self.player.point.copy()
+
         # Check if the player is allowed to move in that direction
         match int(dir):
             case int(Direction.UP):
@@ -254,7 +257,8 @@ class Arena:
             self.player.y = self.m - 1
         
         # Add the updated position to the list of player positions
-        self.player.positions.append(Point(self.player.x, self.player.y))
+        # if player_old_pos != self.player:
+        #     self.player.positions.append(player_old_pos)
         
         # Update the grid to display the players location
         self.grid[self.player.y][self.player.x] = self.PLAYER
