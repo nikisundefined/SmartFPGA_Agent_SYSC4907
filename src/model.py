@@ -18,8 +18,8 @@ class AttrDict:
     player_moved: bool = True # Did the player's location change from the last action
     ensemble_neurons: int = 400 # The number of neurons per ensemble
     learning_rate: float = 5e-6 # Learning rate of the learning rule
-    neuron_type: nengo.neurons.NeuronType = nengo.SpikingRectifiedLinear() # Neuron type used in all ensembles
-    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True) # Solver type used for learning connections
+    neuron_type: nengo.neurons.NeuronType = nengo.neurons.AdaptiveLIF(tau_n=0.01) # Neuron type used in all ensembles
+    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=False) # Solver type used for learning connections
     learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate, pre_synapse=None) # Learning rule used for learning connections
     input_dimensions: int = 4 # Number of dimensions input to the model
     output_dimensions: int = 4 # Number of dimensions output from the model
@@ -151,9 +151,9 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
 
     # Compute the error for an early return
     # Error is the baseline value scaled by the inverse of the reward in the best direction
-    err: np.ndarray = np.zeros(4) # Set the error to the negative of the post to reset all values
+    err: np.ndarray = -x # Set the error to the negative of the post to reset all values
     err_scale: float = (1 / cvar.reward) ** 5 # Factor to scale error by
-    err_val: float = x[best_direction] - BASELINE_ERROR * 1 # Compute the error value for the best direction
+    err_val: float = x[best_direction] - BASELINE_ERROR * err_scale # Compute the error value for the best direction
     # Set the direction we want to go in to the computed error value
     err[best_direction] = err_val
     # Prevent the error from going beyond the baseline error value
@@ -194,11 +194,11 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     cvar.reward = max(cvar.reward, 1)
 
     # Recompute the error with the updated reward
-    err: np.ndarray = np.zeros(4)
+    err: np.ndarray = -x
     err_scale: float = (1 / cvar.reward) ** 5
-    err_val: float = x[best_direction] - BASELINE_ERROR * 1
+    err_val: float = x[best_direction] - BASELINE_ERROR * err_scale
     err[best_direction] = err_val
-    err = err.clip(-1, 1)
+    err = err.clip(-BASELINE_ERROR, BASELINE_ERROR)
     log.debug(f'  Updated error to: {err}')
     log.debug(f'  Updated reward to: {cvar.reward}')
     
@@ -318,6 +318,9 @@ def limiter(t: float, x: np.ndarray):
         return -1
     return 0
 
+def inhibit(t: float) -> float:
+    return 0.0 if t < 10.0 else 1.0
+
 # Global model definition for use with NengoGUI
 model = nengo.Network(label='pacman')
 with model:
@@ -349,6 +352,11 @@ with model:
     #     size_in=cvar.output_dimensions,
     #     label='Shutoff'
     # )
+    ninhibit = nengo.Node(
+        output=inhibit,
+        size_out=1,
+        label='Inhibit'
+    )
 
     # Ensembles
     pre = nengo.Ensemble(
@@ -381,8 +389,16 @@ with model:
         pre=pre,
         post=post,
         learning_rule_type=cvar.learning_rule_type,
+        # solver=cvar.solver_type
         label='Pre -> Post Connection',
     )
+    # conn_post_pre = nengo.Connection(
+    #     pre=post,
+    #     post=pre,
+    #     synapse=None,
+    #     function=lambda x: x * 0.8,
+    #     label='Loopback Connection'
+    # )
 
     # Output Filtering Connections
     conn_post_bg = nengo.Connection(
@@ -420,7 +436,7 @@ with model:
     conn_learn = nengo.Connection(
         pre=err,
         post=conn_pre_post.learning_rule,
-        function=lambda x: [0.8, 0.7, 0.6, 0.5],
+        # function=lambda x: [0.8, 0.7, 0.6, 0.5],
         label='Learning Connection'
     )
 
@@ -433,6 +449,12 @@ with model:
     #     pre=shutoff,
     #     post=post,
     #     transform=-10*np.ones((post.size_in,1))
+    # )
+    # conn_inhibit = nengo.Connection(
+    #     pre=ninhibit,
+    #     post=err.neurons,
+    #     transform=[[-10]] * err.n_neurons,
+    #     label='Inhibit Conneciton'
     # )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate

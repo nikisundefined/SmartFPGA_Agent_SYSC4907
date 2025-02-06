@@ -18,9 +18,9 @@ class Point:
     
     def asdirection(self) -> 'Direction':
         if self.x > 1 or self.y > 1 or self.x < -1 or self.y < -1:
-            raise ValueError("Point must contain only a single direction-like value")
+            raise ValueError(f"Point must contain only a single direction-like value: {self}")
         if self.x and self.y:
-            raise ValueError("Point should only contain a value in one direction (x or y)")
+            raise ValueError(f"Point should only contain a value in one direction (x or y): {self}")
         
         if self.x:
             return Direction.LEFT if self.x < 0 else Direction.RIGHT
