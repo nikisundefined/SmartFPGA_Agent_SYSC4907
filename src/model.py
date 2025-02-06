@@ -10,26 +10,26 @@ import nengo.neurons
 import nengo.solvers
 import numpy as np
 from dataclasses import dataclass
-from lib.simulation import Arena, Direction, Point, Player
+from simulation import Arena, Direction, Point, Player
 
 @dataclass
 class AttrDict:
     last_action: Direction = None # The last action performed by the agent in the simulation
     player_moved: bool = True # Did the player's location change from the last action
     ensemble_neurons: int = 400 # The number of neurons per ensemble
-    learning_rate: float = 5e-7 # Learning rate of the learning rule
+    learning_rate: float = 5e-6 # Learning rate of the learning rule
     neuron_type: nengo.neurons.NeuronType = nengo.SpikingRectifiedLinear() # Neuron type used in all ensembles
     solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True) # Solver type used for learning connections
     learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate, pre_synapse=None) # Learning rule used for learning connections
     input_dimensions: int = 4 # Number of dimensions input to the model
     output_dimensions: int = 4 # Number of dimensions output from the model
-    error_dimensions: int = 8 # Number of dimensions ouput from the error function
+    error_dimensions: int = 4 # Number of dimensions ouput from the error function
     dtype: np.dtype = np.float64 # The datatype used for all numpy arrays
 
     expected_reward: float = 0.0 # Last states expected reward
-    reward: float = 0.0 # The current reward of the agent
+    reward: float = 1.0 # The current reward of the agent
 
-    movement_threshold: float = 1e-9 # The minimum value for an action to be selected
+    movement_threshold: float = 1e-6 # The minimum value for an action to be selected
     movement_weight: float = 0.8 # Weight of movement on error
     direction_weight: float = 0.2 # Weight of detection distance on error
 
@@ -103,8 +103,8 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if index < 0 or index > 3:
         raise IndexError(f'simulation.Direction: Index {index} out of range')
     tmp: Point = Point(cvar.arena.player.x, cvar.arena.player.y) # Store the old location
-    cvar.arena.move(index)
-    
+    cvar.arena.move(index) # Move the player in the arena
+    cvar.last_action = None if tmp == cvar.arena.player else (tmp - cvar.arena.player.point).asdirection() # Store the direction moved or 
 
     # Check if the player has stopped moving and log it
     if cvar.player_moved and tmp == cvar.arena.player:
@@ -120,8 +120,8 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if cvar.arena.on_goal():
         log.info("  Agent reached the goal")
         cvar.arena.set_goal()
-        if np.any(cvar.reward < 0):
-            cvar.reward = 0
+        # if np.any(cvar.reward < 0):
+        #     cvar.reward = 0
     cvar.action_performed = True
 
     if cvar.in_gui:
@@ -141,33 +141,67 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 #   - The last location of the agent (LL)
 #   - The distance from the agent to the goal (GL)
 #   - The detection distance in all directions (SD)
-def error(t: float, x: np.ndarray, cvar: AttrDict = cvar):
-    WEIGHT_ADJUSTMENT: float = 0.01 # Amount to adjust error weights by
+def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
+    BASELINE_ERROR: float = 0.8 # The maximum value for the error
 
-    # Extract the inputs from the compressed input
-    ll: np.ndarray = x[0:4]
-    gl: np.ndarray = x[4:8]
-    sd: np.ndarray = x[8:12]
+    # Get the best path to the goal
+    path: list[Point] = cvar.arena.distance() # TODO: Check if this is reduced to a lookup in between movements
+    # Compute the best direction based on the best path
+    best_direction: Direction = (cvar.arena.player.point - path[1]).asdirection()
 
-    # Only update the error weights every ~1 second
-    if math.isclose(t,int(t)):
-        return gl + sd
+    # Compute the error for an early return
+    # Error is the baseline value scaled by the inverse of the reward in the best direction
+    err: np.ndarray = np.zeros(4) # Set the error to the negative of the post to reset all values
+    err_scale: float = (1 / cvar.reward) ** 5 # Factor to scale error by
+    err_val: float = x[best_direction] - BASELINE_ERROR * 1 # Compute the error value for the best direction
+    # Set the direction we want to go in to the computed error value
+    err[best_direction] = err_val
+    # Prevent the error from going beyond the baseline error value
+    err = err.clip(-BASELINE_ERROR, BASELINE_ERROR)
 
-    # Check if the agent is moving in the direction that has the most open space
-    if cvar.last_action and np.argmax(sd) != int(cvar.last_action):
-        cvar.direction_weight += WEIGHT_ADJUSTMENT
-        cvar.movement_weight -= WEIGHT_ADJUSTMENT
-    else:    
-        sd *= cvar.direction_weight
+    # Only update the error when the agent has performed an action
+    if not cvar.action_performed:
+        return err
+    cvar.action_performed = False
+
+    # Compute the reward value for the current timestep
+    def reward(player: Player, player_moved: bool, path: list[Point]) -> float:
+        MOVEMENT_REWARD: float = 1.0 # The rewarda for moving (doubles as the penalty for not moving)
+
+        # The number of steps to the goal (minus the current [0] and goal [len - 1] locations)
+        dist_to_goal: int = len(path) - 2
+        # How many steps did the agent needd to get to the goal in the last step
+        previous_distance: int = len(cvar.arena.distance(start=player.positions[-1]))
+        # Did the agent move towards the goal in this timestep
+        moved_towards_goal: bool = dist_to_goal < previous_distance
+        # Did the agent hit a wall in this timestep
+        hit_wall: bool = player.positions[-1] == player.point
+
+        reward: float = 0.0
+        # Reward the agent for moving and punish for not moving
+        reward += MOVEMENT_REWARD if player_moved else -MOVEMENT_REWARD
+        # Reward the agent for moving towards the goal, but do not punish if it did not
+        if moved_towards_goal:
+            reward += 2 * MOVEMENT_REWARD
+        # Punish the agent for moving/hitting a wall
+        if hit_wall:
+            reward -= 2 * MOVEMENT_REWARD
+        return reward
+
+    # Adjust the current state based on the current reward
+    cvar.reward += reward(cvar.arena.player, cvar.player_moved, path)
+    # Ensure that the minimum reward state possible is 1 for the later division to always succeed
+    cvar.reward = max(cvar.reward, 1)
+
+    # Recompute the error with the updated reward
+    err: np.ndarray = np.zeros(4)
+    err_scale: float = (1 / cvar.reward) ** 5
+    err_val: float = x[best_direction] - BASELINE_ERROR * 1
+    err[best_direction] = err_val
+    err = err.clip(-1, 1)
+    log.debug(f'  Updated error to: {err}')
+    log.debug(f'  Updated reward to: {cvar.reward}')
     
-    # Check if the agent moved during the last action
-    if not ll.any(0):
-        cvar.movement_weight += WEIGHT_ADJUSTMENT
-        cvar.direction_weight -= WEIGHT_ADJUSTMENT
-        gl *= cvar.movement_weight
-
-    # Compute and return error
-    err = gl + sd
     return err
 
 def error_new(t: float, x: np.ndarray, cvar: AttrDict = cvar):
@@ -305,7 +339,7 @@ with model:
     )
     # Error computation Input/Output
     err_tra = nengo.Node(
-        output=error_new,
+        output=error,
         size_in=cvar.error_dimensions,
         size_out=cvar.output_dimensions,
         label='Error Compute',
@@ -375,14 +409,14 @@ with model:
     )
     conn_post_err = nengo.Connection(
         pre=post,
-        post=err_tra[:4],
+        post=err_tra,
         label='Post Feedback'
     )
-    conn_pre_err = nengo.Connection(
-        pre=pre,
-        post=err_tra[4:],
-        label='Pre Feedback'
-    )
+    # conn_pre_err = nengo.Connection(
+    #     pre=pre,
+    #     post=err_tra[4:],
+    #     label='Pre Feedback'
+    # )
     conn_learn = nengo.Connection(
         pre=err,
         post=conn_pre_post.learning_rule,
@@ -403,7 +437,7 @@ with model:
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
 def main():
-    import lib.gui as gui
+    import gui
     import time
     import dearpygui.dearpygui as dpg
     import pause
@@ -437,7 +471,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         if '--gui' in sys.argv:
             import os
-            import lib.gui as gui
+            import gui
             import dearpygui.dearpygui as dpg
 
             ARENA_FILE: str = "arena.png"
@@ -477,7 +511,7 @@ if __name__ == '__main__':
         exit(1)
 
 if '__page__' in locals():
-    cvar.in_gui = True # Indicate that the script is run in nengo gui
+    # cvar.in_gui = True # Indicate that the script is run in nengo gui
     log = nengo.logger
     log.setLevel('INFO')
     print('Setting up for NengoGUI')

@@ -5,7 +5,6 @@ import math
 import astar
 from typing import Union
 from enum import IntEnum
-from PIL import Image
 
 class Point:
     @classmethod
@@ -16,6 +15,16 @@ class Point:
     def asmagnitude(self, dtype: np.dtype = np.float64) -> np.ndarray:
         tmp: np.ndarray = np.array([-self.y, self.x, self.y, -self.x], dtype=dtype)
         return np.maximum(tmp, np.zeros(tmp.shape))
+    
+    def asdirection(self) -> 'Direction':
+        if self.x > 1 or self.y > 1 or self.x < -1 or self.y < -1:
+            raise ValueError("Point must contain only a single direction-like value")
+        if self.x and self.y:
+            raise ValueError("Point should only contain a value in one direction (x or y)")
+        
+        if self.x:
+            return Direction.LEFT if self.x < 0 else Direction.RIGHT
+        return Direction.UP if self.y < 0 else Direction.DOWN
     
     def distance(self, other: 'Point') -> float:
         return math.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
@@ -145,6 +154,23 @@ class Player:
     def y(self, y: int) -> None:
         self.point.y = y
 
+class PathPair:
+    def __init__(self, start: Point, end: Point):
+        self.start: Point = start.copy()
+        self.end: Point = end.copy()
+
+    def __eq__(self, other: 'PathPair') -> bool:
+        return self.start == other.start and self.end == other.end
+    
+    def __str__(self) -> str:
+        return f"[{self.start}, {self.end}]"
+    
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __hash__(self) -> int:
+        return hash(str(self))
+
 class Arena:
     EMPTY = 0
     WALL = 1
@@ -160,7 +186,7 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
-        self.path: list[Point] | None = None
+        self.path: dict[PathPair, list[Point]] = {}
     
     def __json__(self) -> dict[str]:
         return {
@@ -263,9 +289,6 @@ class Arena:
         # Update the grid to display the players location
         self.grid[self.player.y][self.player.x] = self.PLAYER
 
-        # Clear the path cache as the player has moved
-        self.path = None
-
     def set_goal(self) -> None:
         """Change the location of the goal. Should ony be called after Arena.on_goal() returns True"""
         # Clear the goal from the grid
@@ -318,15 +341,16 @@ class Arena:
     
     # The distance between two points in the grid using the A* algorithm
     def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
-        # If the path between the player and goal has been cached return that instead
-        if start is None and end is None and self.path is not None:
-            return self.path.copy()
-        
         # Set defaults for the start and end positions
         if start is None:
             start = self.player.point
         if end is None:
             end = self.goal
+
+        pathKey: PathPair = PathPair(start, end)
+        assert start is not None and end is not None and pathKey is not None
+        if pathKey in self.path.keys():
+            return self.path[pathKey]
 
         # Define function to calculate neighbors of points
         def neighbors(p: Point, arena: 'Arena' = self) -> list[Point]:
@@ -349,8 +373,7 @@ class Arena:
         if tmp is not None:
             tmp = [p for p in tmp]
         # Update the path cache
-        if self.path is None and start == self.player.point and end == self.goal:
-            self.path = tmp
+        self.path[pathKey] = tmp
         return tmp
     
     def __str__(self) -> str:
