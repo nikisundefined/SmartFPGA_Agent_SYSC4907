@@ -44,6 +44,10 @@ def update_grid(arena: simulation.Arena, block_size: int = 10, tag: str | int = 
 
 def move(sender, app_data, user_data: simulation.Direction):
     global arena
+    if 'cvar' in globals():
+        global cvar
+        arena = cvar.arena
+
     arena.move(simulation.Direction(user_data))
     if arena.on_goal():
         arena.set_goal()

@@ -178,7 +178,7 @@ class Arena:
     GOAL = 3
 
     _player_start: Point = Point(3,3)
-    _goal_start: Point = Point(11, 10)
+    _goal_start: Point = Point(11, 9)
     
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n

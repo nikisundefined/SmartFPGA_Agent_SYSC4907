@@ -125,12 +125,8 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     cvar.action_performed = True
 
     if cvar.in_gui:
-        from PIL import Image
-        arr = cvar.arena.display()
-        if arr is None:
-            return
-        img = Image.fromarray(arr)
-        img.save("arena.png")
+        import gui
+        gui.update_grid(cvar.arena)
 
 ### End Output Node Functions ###
 
@@ -152,8 +148,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     # Compute the error for an early return
     # Error is the baseline value scaled by the inverse of the reward in the best direction
     err: np.ndarray = x # Set the error to the negative of the post to reset all values
-    err_scale: float = (1 / cvar.reward) ** 5 # Factor to scale error by
-    err_val: float = BASELINE_ERROR * err_scale - x[best_direction] # Compute the error value for the best direction
+    err_scale: float = (1.0 / cvar.reward) # Factor to scale error by
+    err_val: float = (BASELINE_ERROR - x[best_direction]) * err_scale  # Compute the error value for the best direction
     # Set the direction we want to go in to the computed error value
     err[best_direction] = err_val
     # Prevent the error from going beyond the baseline error value
@@ -173,11 +169,13 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         # The number of steps to the goal (minus the current [0] and goal [len - 1] locations)
         dist_to_goal: int = len(path) - 2
         # How many steps did the agent needd to get to the goal in the last step
-        previous_distance: int = len(cvar.arena.distance(start=player.positions[-1]))
+        previous_distance: int = len(cvar.arena.distance(start=player.positions[-1])) - 2
         # Did the agent move towards the goal in this timestep
         moved_towards_goal: bool = dist_to_goal < previous_distance
         # Did the agent hit a wall in this timestep
         hit_wall: bool = player.positions[-1] == player.point
+
+        log.debug(f'  Reward Calc: [moved_towards_goal {moved_towards_goal}], [player_moved {player_moved}], [hit_wall {hit_wall}]')
 
         reward: float = 0.0
         # Reward the agent for moving and punish for not moving
@@ -185,6 +183,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         # Reward the agent for moving towards the goal, but do not punish if it did not
         if moved_towards_goal:
             reward += 2 * MOVEMENT_REWARD
+        else:
+            reward -= MOVEMENT_REWARD
         # Punish the agent for moving/hitting a wall
         if hit_wall:
             reward -= 2 * MOVEMENT_REWARD
@@ -197,8 +197,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
 
     # Recompute the error with the updated reward
     err: np.ndarray = x
-    err_scale: float = (1.0 / cvar.reward) ** 5.0
-    err_val: float = BASELINE_ERROR * err_scale - x[best_direction]
+    err_scale: float = (1.0 / cvar.reward)
+    err_val: float = (BASELINE_ERROR - x[best_direction]) * err_scale
     err[best_direction] = err_val
     err = err.clip(-BASELINE_ERROR, BASELINE_ERROR)
     log.debug(f'  Updated error to: {err}')
@@ -325,158 +325,165 @@ def limiter(t: float, x: np.ndarray):
 def inhibit(t: float) -> float:
     return 0.0 if t < 10.0 else 1.0
 
-# Global model definition for use with NengoGUI
-model = nengo.Network(label='pacman')
-with model:
-    bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
-    thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
+def create_model():
+    global model
+    # Global model definition for use with NengoGUI
+    model = nengo.Network(label='pacman')
+    with model:
+        bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
+        thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
 
-    # Nodes (interaction with simulation)
-    # Detection distance input
-    dist_in = nengo.Node(
-        output=detection,
-        size_out=cvar.input_dimensions,
-        label='Distance Input Node'
-    )
-    # Movement output
-    mov_out = nengo.Node(
-        output=move,
-        size_in=cvar.output_dimensions,
-        label='Movement Output'
-    )
-    # Error computation Input/Output
-    err_tra = nengo.Node(
-        output=error,
-        size_in=cvar.error_dimensions,
-        size_out=cvar.output_dimensions,
-        label='Error Compute',
-    )
-    # shutoff = nengo.Node(
-    #     output=limiter,
-    #     size_in=cvar.output_dimensions,
-    #     label='Shutoff'
-    # )
-    ninhibit = nengo.Node(
-        output=inhibit,
-        size_out=1,
-        label='Inhibit'
-    )
+        # Nodes (interaction with simulation)
+        # Detection distance input
+        dist_in = nengo.Node(
+            output=detection,
+            size_out=cvar.input_dimensions,
+            label='Distance Input Node'
+        )
+        # Movement output
+        mov_out = nengo.Node(
+            output=move,
+            size_in=cvar.output_dimensions,
+            label='Movement Output'
+        )
+        # Error computation Input/Output
+        err_tra = nengo.Node(
+            output=error,
+            size_in=cvar.error_dimensions,
+            size_out=cvar.output_dimensions,
+            label='Error Compute',
+        )
+        # shutoff = nengo.Node(
+        #     output=limiter,
+        #     size_in=cvar.output_dimensions,
+        #     label='Shutoff'
+        # )
+        # ninhibit = nengo.Node(
+        #     output=inhibit,
+        #     size_out=1,
+        #     label='Inhibit'
+        # )
+        nreward = nengo.Node(
+            output=lambda x: cvar.reward,
+            size_out=1,
+            label='Reward'
+        )
 
-    # Ensembles
-    pre = nengo.Ensemble(
-        n_neurons=cvar.ensemble_neurons,
-        dimensions=cvar.input_dimensions,
-        neuron_type=cvar.neuron_type,
-        label='Pre',
-    )
-    post = nengo.Ensemble(
-        n_neurons=cvar.ensemble_neurons,
-        dimensions=cvar.output_dimensions,
-        neuron_type=cvar.neuron_type,
-        label='Post',
-    )
-    err = nengo.Ensemble(
-        n_neurons=cvar.ensemble_neurons,
-        dimensions=cvar.output_dimensions,
-        neuron_type=cvar.neuron_type,
-        label='Error',
-    )
+        # Ensembles
+        pre = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.input_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Pre',
+        )
+        post = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Post',
+        )
+        err = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Error',
+        )
 
-    def func(t, x):
-        return np.array([1 if x[0] > 0 else 0,
-                         1 if x[1] > 0 else 0,
-                         1 if x[2] > 0 else 0,
-                         1 if x[3] > 0 else 0], dtype=np.uint8)
-    ncol = nengo.Node(
-        output=func,
-        size_in=cvar.input_dimensions,
-        size_out=cvar.input_dimensions,
-        label='Cap'
-    )
-    conn = nengo.Connection(
-        pre=dist_in,
-        post=ncol,
-        synapse=None,
-        label='Function Transform'
-    )
-    # Processing Connections
-    conn_dist_in = nengo.Connection(
-        pre=ncol,
-        post=pre,
-        # function=func,
-        label='Distance Input Connection',
-    )
-    conn_pre_post = nengo.Connection(
-        pre=pre,
-        post=post,
-        learning_rule_type=cvar.learning_rule_type,
-        # solver=cvar.solver_type
-        label='Pre -> Post Connection',
-    )
-    # conn_post_pre = nengo.Connection(
-    #     pre=post,
-    #     post=pre,
-    #     synapse=None,
-    #     function=lambda x: x * 0.8,
-    #     label='Loopback Connection'
-    # )
+        def func(t, x):
+            return np.array([1 if x[0] > 0 else 0,
+                            1 if x[1] > 0 else 0,
+                            1 if x[2] > 0 else 0,
+                            1 if x[3] > 0 else 0], dtype=np.uint8)
+        # ncol = nengo.Node(
+        #     output=func,
+        #     size_in=cvar.input_dimensions,
+        #     size_out=cvar.input_dimensions,
+        #     label='Cap'
+        # )
+        # conn = nengo.Connection(
+        #     pre=dist_in,
+        #     post=ncol,
+        #     synapse=None,
+        #     label='Function Transform'
+        # )
+        # Processing Connections
+        conn_dist_in = nengo.Connection(
+            pre=dist_in,
+            post=pre,
+            # function=func,
+            label='Distance Input Connection',
+        )
+        conn_pre_post = nengo.Connection(
+            pre=pre,
+            post=post,
+            learning_rule_type=cvar.learning_rule_type,
+            # solver=cvar.solver_type
+            label='Pre -> Post Connection',
+        )
+        # conn_post_pre = nengo.Connection(
+        #     pre=post,
+        #     post=pre,
+        #     synapse=None,
+        #     function=lambda x: x * 0.8,
+        #     label='Loopback Connection'
+        # )
 
-    # Output Filtering Connections
-    conn_post_bg = nengo.Connection(
-        pre=post,
-        post=bg.input,
-        label='Post -> BG Connection'
-    )
-    conn_bg_thal = nengo.Connection(
-        pre=bg.output,
-        post=thal.input,
-        label='BG -> Thal Connection'
-    )
-    conn_thal_out = nengo.Connection(
-        pre=thal.output,
-        post=mov_out,
-        label='Action Output Connection'
-    )
+        # Output Filtering Connections
+        conn_post_bg = nengo.Connection(
+            pre=post,
+            post=bg.input,
+            label='Post -> BG Connection'
+        )
+        conn_bg_thal = nengo.Connection(
+            pre=bg.output,
+            post=thal.input,
+            label='BG -> Thal Connection'
+        )
+        conn_thal_out = nengo.Connection(
+            pre=thal.output,
+            post=mov_out,
+            label='Action Output Connection'
+        )
 
-    # Learning Connections
-    conn_err_tra = nengo.Connection(
-        pre=err_tra,
-        post=err,
-        label='Error Transformation Connection'
-    )
-    conn_post_err = nengo.Connection(
-        pre=post,
-        post=err_tra,
-        label='Post Feedback'
-    )
-    # conn_pre_err = nengo.Connection(
-    #     pre=pre,
-    #     post=err_tra[4:],
-    #     label='Pre Feedback'
-    # )
-    conn_learn = nengo.Connection(
-        pre=err,
-        post=conn_pre_post.learning_rule,
-        # function=lambda x: [0.8, 0.7, 0.6, 0.5],
-        label='Learning Connection'
-    )
+        # Learning Connections
+        conn_err_tra = nengo.Connection(
+            pre=err_tra,
+            post=err,
+            label='Error Transformation Connection'
+        )
+        conn_post_err = nengo.Connection(
+            pre=post,
+            post=err_tra,
+            label='Post Feedback'
+        )
+        # conn_pre_err = nengo.Connection(
+        #     pre=pre,
+        #     post=err_tra[4:],
+        #     label='Pre Feedback'
+        # )
+        conn_learn = nengo.Connection(
+            pre=err,
+            post=conn_pre_post.learning_rule,
+            # function=lambda x: [0.8, 0.7, 0.6, 0.5],
+            label='Learning Connection'
+        )
 
-    # Limiter
-    # conn_post_limit = nengo.Connection(
-    #     pre=post,
-    #     post=shutoff,
-    # )
-    # conn_limit_post = nengo.Connection(
-    #     pre=shutoff,
-    #     post=post,
-    #     transform=-10*np.ones((post.size_in,1))
-    # )
-    # conn_inhibit = nengo.Connection(
-    #     pre=ninhibit,
-    #     post=err.neurons,
-    #     transform=[[-10]] * err.n_neurons,
-    #     label='Inhibit Conneciton'
-    # )
+        # Limiter
+        # conn_post_limit = nengo.Connection(
+        #     pre=post,
+        #     post=shutoff,
+        # )
+        # conn_limit_post = nengo.Connection(
+        #     pre=shutoff,
+        #     post=post,
+        #     transform=-10*np.ones((post.size_in,1))
+        # )
+        # conn_inhibit = nengo.Connection(
+        #     pre=ninhibit,
+        #     post=err.neurons,
+        #     transform=[[-10]] * err.n_neurons,
+        #     label='Inhibit Conneciton'
+        # )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
 def main():
@@ -508,10 +515,38 @@ def main():
         log.debug(f'Simulator ran: {sim.n_steps} steps')
     dpg.destroy_context()
 
+def web_gui():
+    import gui
+    import dearpygui.dearpygui as dpg
+    import time as tim
+    gui.create_gui(cvar.arena)
+    # dpg.add_text(f"{sim.seed}", tag='seed', parent='Pacman') # Add custom text box displaying simulator seed
+    
+    gui.display_gui() # Display GUI
+    # log.info(f'Starting simulator with seed: {sim.seed}')
+    while dpg.is_dearpygui_running():
+        jobs = dpg.get_callback_queue()
+        dpg.run_callbacks(jobs)
+
+        gui.update_text() # Update text boxes in the gui
+        # dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265]) # Update custom text box added earlier
+        
+        # gui.update_grid(cvar.arena) # Update the arena representation inside the GUI
+        dpg.render_dearpygui_frame() # Render the updated frame to the GUI
+        tim.sleep(0.1)
+    dpg.destroy_context()
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
+        if '--nengo' in sys.argv:
+            import nengo_gui
+            from threading import Thread
+
+            Thread(target=web_gui, daemon=True).start()
+            nengo_gui.GUI(filename=__file__, editor=True).start()
+            exit(0)
         if '--gui' in sys.argv:
             import os
             import gui
@@ -554,8 +589,11 @@ if __name__ == '__main__':
         exit(1)
 
 if '__page__' in locals():
-    # cvar.in_gui = True # Indicate that the script is run in nengo gui
+    cvar.in_gui = True # Indicate that the script is run in nengo gui
     log = nengo.logger
     log.setLevel('INFO')
     print('Setting up for NengoGUI')
     logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    global model
+    model: nengo.Network = None
+    create_model()
