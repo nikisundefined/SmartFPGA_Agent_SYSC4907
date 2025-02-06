@@ -11,7 +11,7 @@ import nengo.solvers
 import numpy as np
 from dataclasses import dataclass
 from simulation import Arena, Direction, Point, Player
-
+ 
 @dataclass
 class AttrDict:
     last_action: Direction = None # The last action performed by the agent in the simulation
@@ -147,13 +147,13 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the best path to the goal
     path: list[Point] = cvar.arena.distance() # TODO: Check if this is reduced to a lookup in between movements
     # Compute the best direction based on the best path
-    best_direction: Direction = (cvar.arena.player.point - path[1]).asdirection()
+    best_direction: Direction = (path[1] - cvar.arena.player.point).asdirection()
 
     # Compute the error for an early return
     # Error is the baseline value scaled by the inverse of the reward in the best direction
-    err: np.ndarray = -x # Set the error to the negative of the post to reset all values
+    err: np.ndarray = x # Set the error to the negative of the post to reset all values
     err_scale: float = (1 / cvar.reward) ** 5 # Factor to scale error by
-    err_val: float = x[best_direction] - BASELINE_ERROR * err_scale # Compute the error value for the best direction
+    err_val: float = BASELINE_ERROR * err_scale - x[best_direction] # Compute the error value for the best direction
     # Set the direction we want to go in to the computed error value
     err[best_direction] = err_val
     # Prevent the error from going beyond the baseline error value
@@ -163,6 +163,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     if not cvar.action_performed:
         return err
     cvar.action_performed = False
+    log.debug(f'  Best Direction is: {best_direction.name}')
+    log.debug(f'  Best Path: {path[1:-1]}')
 
     # Compute the reward value for the current timestep
     def reward(player: Player, player_moved: bool, path: list[Point]) -> float:
@@ -194,9 +196,9 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     cvar.reward = max(cvar.reward, 1)
 
     # Recompute the error with the updated reward
-    err: np.ndarray = -x
-    err_scale: float = (1 / cvar.reward) ** 5
-    err_val: float = x[best_direction] - BASELINE_ERROR * err_scale
+    err: np.ndarray = x
+    err_scale: float = (1.0 / cvar.reward) ** 5.0
+    err_val: float = BASELINE_ERROR * err_scale - x[best_direction]
     err[best_direction] = err_val
     err = err.clip(-BASELINE_ERROR, BASELINE_ERROR)
     log.debug(f'  Updated error to: {err}')
@@ -288,7 +290,9 @@ def error_new(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 
 # Get the distance to a wall in every direction starting from the agent
 def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
-    return cvar.arena.detection().astype(cvar.dtype)
+    tmp = cvar.arena.detection().astype(cvar.dtype)
+    tmp = tmp.clip(0, 1)
+    return tmp
 
 # Convert the current state of the arena into an RGBA pixel array
 def generate_grid_image(arena: Arena, block_size: int = 10) -> np.ndarray:
@@ -378,11 +382,28 @@ with model:
         label='Error',
     )
 
+    def func(t, x):
+        return np.array([1 if x[0] > 0 else 0,
+                         1 if x[1] > 0 else 0,
+                         1 if x[2] > 0 else 0,
+                         1 if x[3] > 0 else 0], dtype=np.uint8)
+    ncol = nengo.Node(
+        output=func,
+        size_in=cvar.input_dimensions,
+        size_out=cvar.input_dimensions,
+        label='Cap'
+    )
+    conn = nengo.Connection(
+        pre=dist_in,
+        post=ncol,
+        synapse=None,
+        label='Function Transform'
+    )
     # Processing Connections
     conn_dist_in = nengo.Connection(
-        pre=dist_in,
+        pre=ncol,
         post=pre,
-        function=lambda x: x / 15,
+        # function=func,
         label='Distance Input Connection',
     )
     conn_pre_post = nengo.Connection(

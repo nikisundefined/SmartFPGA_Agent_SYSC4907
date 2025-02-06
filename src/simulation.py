@@ -178,7 +178,7 @@ class Arena:
     GOAL = 3
 
     _player_start: Point = Point(3,3)
-    _goal_start: Point = Point(6, 1)
+    _goal_start: Point = Point(11, 10)
     
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n
@@ -187,6 +187,7 @@ class Arena:
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
         self.path: dict[PathPair, list[Point]] = {}
+        assert self.grid[self.goal.y][self.goal.x] != Arena.WALL
     
     def __json__(self) -> dict[str]:
         return {
