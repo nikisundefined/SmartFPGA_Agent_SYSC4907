@@ -1,0 +1,12 @@
+name: nengo
+channels:
+  - conda-forge
+dependencies:
+  - nengo==4.0.0
+  - nengo-dl
+  - nengo-extras
+  - nengo-gui
+  - nengo-ocl
+  - nengo-spa
+  - tensorflow-cpu
+  - python==3.10.0
