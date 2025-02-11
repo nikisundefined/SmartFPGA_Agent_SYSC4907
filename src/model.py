@@ -9,7 +9,7 @@ import nengo.learning_rules
 import nengo.neurons
 import nengo.solvers
 import nengo_gui
-import os
+import nengo_fpga.networks
 import numpy as np
 import gui
 import time
@@ -35,13 +35,13 @@ class AttrDict:
     # The number of neurons per ensemble
     ensemble_neurons: int = 400
     # Learning rate of the learning rule
-    learning_rate: float = 5e-6
+    learning_rate: float = 5e-5
     # The adaptive factor used with the Adaptive LIF neuron type
     tau_n: float = 0.01
     # Neuron type used in all ensembles
     neuron_type: nengo.neurons.NeuronType = nengo.neurons.AdaptiveLIF(tau_n=tau_n)
     # Solver type used for learning connections
-    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqMultNoise(weights=True)
+    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqMultNoise(weights=False)
     # Learning rule used for learning connections
     learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate, pre_synapse=None)
     # Number of dimensions input to the model
@@ -65,7 +65,7 @@ class AttrDict:
     # Flag if the current action moved away from the goal
     moved_away_from_goal: int = 0
     # The logging level for the script to print out
-    log_level: str | int = int(logging.DEBUG)
+    log_level: str | int = int(logging.INFO)
     
     def export(self) -> str:
         class JsonEncoder(json.JSONEncoder):
@@ -257,87 +257,88 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     return err
 
 # NOTE: this is actually the old error equation, DO NOT USE
-def error_new(t: float, x: np.ndarray, cvar: AttrDict = cvar):
-    """
-    dis_to_goal = root((Xc-Xg)^2 + (Yx-Yg)^2)
-    reward(t) = + goal_w * (previous_distance - dis_to_goal) if moved towards
-            - wall_w * wall_penalty              if hits wall
-            - goal_w * (dis_to_goal - previous_distance) if moves away 
-            0  if no change
+# NOTE: Deprecated
+# def error_new(t: float, x: np.ndarray, cvar: AttrDict = cvar):
+#     """
+#     dis_to_goal = root((Xc-Xg)^2 + (Yx-Yg)^2)
+#     reward(t) = + goal_w * (previous_distance - dis_to_goal) if moved towards
+#             - wall_w * wall_penalty              if hits wall
+#             - goal_w * (dis_to_goal - previous_distance) if moves away 
+#             0  if no change
 
-    goal_w = scaling factor
-    wall_w = scaling factor
-    wall_penalty = binary variable (1/0)
+#     goal_w = scaling factor
+#     wall_w = scaling factor
+#     wall_penalty = binary variable (1/0)
 
-    error calc:
+#     error calc:
 
-    error = reward(t) + d_f * expected_reward_ns - expected_reward
+#     error = reward(t) + d_f * expected_reward_ns - expected_reward
 
-    learning rate lr = 
-    weight_update = lr * error * si(t) * sj(t)
+#     learning rate lr = 
+#     weight_update = lr * error * si(t) * sj(t)
 
-    si = pre
-    sj = post
-"""
-    #d_f: float = 0.9 # Discount factor
+#     si = pre
+#     sj = post
+# """
+#     #d_f: float = 0.9 # Discount factor
 
-    def reward(player: Point, goal: Point, previous_position: Point, cvar: AttrDict = cvar):
-        GOAL_W: float = 0.6 # Weight of the goal
-        WALL_W: float = 0.3 # Weight of hitting the wall
-        WALL_PENALTY: float = 1.0 # The penalty for hitting a wall
-        # The minimum number of steps to the goal
-        dis_to_goal: int = len(cvar.arena.distance())
-        # The previous distance to the goal
-        previous_distance: int = len(cvar.arena.distance(start=previous_position))
-        # Did the agent move towards the goal (absolute distance)
-        moved_towards_goal: bool = dis_to_goal < previous_distance
-        # Did the agent hit the wall (last action caused the agent to not move and move into a wall)
-        hit_wall: bool = player == previous_position
+#     def reward(player: Point, goal: Point, previous_position: Point, cvar: AttrDict = cvar):
+#         GOAL_W: float = 0.6 # Weight of the goal
+#         WALL_W: float = 0.3 # Weight of hitting the wall
+#         WALL_PENALTY: float = 1.0 # The penalty for hitting a wall
+#         # The minimum number of steps to the goal
+#         dis_to_goal: int = len(cvar.arena.distance())
+#         # The previous distance to the goal
+#         previous_distance: int = len(cvar.arena.distance(start=previous_position))
+#         # Did the agent move towards the goal (absolute distance)
+#         moved_towards_goal: bool = dis_to_goal < previous_distance
+#         # Did the agent hit the wall (last action caused the agent to not move and move into a wall)
+#         hit_wall: bool = player == previous_position
 
-        #print(f'Moved towards goal: {moved_towards_goal} [{dis_to_goal} < {previous_distance}] {player} {goal} {previous_position} | {cvar.arena.player.positions}')
+#         #print(f'Moved towards goal: {moved_towards_goal} [{dis_to_goal} < {previous_distance}] {player} {goal} {previous_position} | {cvar.arena.player.positions}')
 
-        reward: float = 0
-        if moved_towards_goal:
-            reward += GOAL_W * (previous_distance - dis_to_goal)
-        elif cvar.player_moved:
-            reward -= GOAL_W * (dis_to_goal - previous_distance)
-        if hit_wall and cvar.action_performed:
-            reward -= WALL_W * WALL_PENALTY
-        if len(set(cvar.arena.player.positions[:-5])) < 3 and len(cvar.arena.player.positions) > 5:
-            reward -= WALL_W * WALL_PENALTY
-        return reward
+#         reward: float = 0
+#         if moved_towards_goal:
+#             reward += GOAL_W * (previous_distance - dis_to_goal)
+#         elif cvar.player_moved:
+#             reward -= GOAL_W * (dis_to_goal - previous_distance)
+#         if hit_wall and cvar.action_performed:
+#             reward -= WALL_W * WALL_PENALTY
+#         if len(set(cvar.arena.player.positions[:-5])) < 3 and len(cvar.arena.player.positions) > 5:
+#             reward -= WALL_W * WALL_PENALTY
+#         return reward
     
-    path: list[Point] = cvar.arena.distance() # Compute the shortest path to the goal
-    #expected_reward_ns: float = reward(path[0], cvar.arena.goal, cvar.arena.player.point)
-    # Error is given as the difference of reward values
-    if math.isclose(t,int(t)):
-        reward_value: float = reward(
-                cvar.arena.player.point, 
-                cvar.arena.goal, 
-                cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
-            )
-        # error: np.ndarray = np.array(
-        #     [reward(cvar.arena.player.point + Direction.UP.topoint(), cvar.arena.goal, cvar.arena.player.point), 
-        #     reward(cvar.arena.player.point + Direction.RIGHT.topoint(), cvar.arena.goal, cvar.arena.player.point),
-        #     reward(cvar.arena.player.point + Direction.DOWN.topoint(), cvar.arena.goal, cvar.arena.player.point),
-        #     reward(cvar.arena.player.point + Direction.LEFT.topoint(), cvar.arena.goal, cvar.arena.player.point)]
-        # )
-        error: np.ndarray = np.zeros(4)
-        error[(cvar.arena.player.point - path[1]).asmagnitude().argmax()] = -reward_value
-        error = error + 0.1 * cvar.reward
-        cvar.reward = error
-        print(f"Reward Value: {error}")
-    else:
-        error = cvar.reward
-    # error: np.ndarray = np.ones(4) * reward_value - x[:4] * np.clip(x[4:], a_min=0, a_max=4/23)
-    # player_last_pos: Point = cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
+#     path: list[Point] = cvar.arena.distance() # Compute the shortest path to the goal
+#     #expected_reward_ns: float = reward(path[0], cvar.arena.goal, cvar.arena.player.point)
+#     # Error is given as the difference of reward values
+#     if math.isclose(t,int(t)):
+#         reward_value: float = reward(
+#                 cvar.arena.player.point, 
+#                 cvar.arena.goal, 
+#                 cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
+#             )
+#         # error: np.ndarray = np.array(
+#         #     [reward(cvar.arena.player.point + Direction.UP.topoint(), cvar.arena.goal, cvar.arena.player.point), 
+#         #     reward(cvar.arena.player.point + Direction.RIGHT.topoint(), cvar.arena.goal, cvar.arena.player.point),
+#         #     reward(cvar.arena.player.point + Direction.DOWN.topoint(), cvar.arena.goal, cvar.arena.player.point),
+#         #     reward(cvar.arena.player.point + Direction.LEFT.topoint(), cvar.arena.goal, cvar.arena.player.point)]
+#         # )
+#         error: np.ndarray = np.zeros(4)
+#         error[(cvar.arena.player.point - path[1]).asmagnitude().argmax()] = -reward_value
+#         error = error + 0.1 * cvar.reward
+#         cvar.reward = error
+#         print(f"Reward Value: {error}")
+#     else:
+#         error = cvar.reward
+#     # error: np.ndarray = np.ones(4) * reward_value - x[:4] * np.clip(x[4:], a_min=0, a_max=4/23)
+#     # player_last_pos: Point = cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
     
-    # if path is not None and len(path) > 2:
-    #     error = error - (cvar.arena.player - path[0]).asmagnitude(cvar.dtype) * 0.01
-    #cvar.expected_reward = expected_reward_ns # Store the expected reward for the next step
+#     # if path is not None and len(path) > 2:
+#     #     error = error - (cvar.arena.player - path[0]).asmagnitude(cvar.dtype) * 0.01
+#     #cvar.expected_reward = expected_reward_ns # Store the expected reward for the next step
     
-    # error = error.clip(-1, 1)
-    return error
+#     # error = error.clip(-1, 1)
+#     return error
 
 # Get the distance to a wall in every direction starting from the agent
 def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
@@ -346,26 +347,96 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
     return tmp.clip(0, 1)
 
-# Convert the current state of the arena into an RGBA pixel array
-# NOTE: Deprecated
-# def generate_grid_image(arena: Arena, block_size: int = 10) -> np.ndarray:
-#     if not hasattr(generate_grid_image, 'shape'):
-#         generate_grid_image.__setattr__('shape', (3, arena.n * block_size, arena.m * block_size))
-#     texture_data: np.ndarray = np.zeros(generate_grid_image.shape)
-#     _map: dict[int, list[float]] = {
-#         Arena.EMPTY: [0, 0, 0, 0], # Black
-#         Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
-#         Arena.PLAYER: [255/ 255, 255 / 255, 0, 255/ 255], # Yellow
-#         Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
-#     }
+def create_model_fpga():
+    global model
+    # Global model definition for use with NengoGUI
+    model = nengo.Network(label='pacman')
+    with model:
+        bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
+        thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
 
-#     for y in range(arena.m): # Every Y coordinate
-#         for _ in range(block_size): # Every Y block
-#             for x in range(arena.n): # Every X coordinate
-#                 for _ in range(block_size): # Every X block
-#                     # RGBA pixel format
-#                     texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
-#     return texture_data
+        # Nodes (interaction with simulation)
+        # Detection distance input
+        dist_in = nengo.Node(
+            output=detection,
+            size_out=cvar.input_dimensions,
+            label='Distance Input Node'
+        )
+        # Movement output
+        mov_out = nengo.Node(
+            output=move,
+            size_in=cvar.output_dimensions,
+            label='Movement Output'
+        )
+        # Error computation Input/Output
+        err_tra = nengo.Node(
+            output=error,
+            size_in=cvar.error_dimensions,
+            size_out=cvar.output_dimensions,
+            label='Error Compute',
+        )
+        nreward = nengo.Node(
+            output=lambda x: cvar.reward,
+            size_out=1,
+            label='Reward'
+        )
+
+        # Ensembles
+        fpga = nengo_fpga.networks.FpgaPesEnsembleNetwork(
+            "ADDME",
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            learning_rate=cvar.learning_rate,
+            label='FPGA'
+        )
+        err = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Error',
+        )
+
+        # Processing Connections
+        conn_dist_in = nengo.Connection(
+            pre=dist_in,
+            post=fpga.input,
+            label='Distance Input Connection',
+        )
+
+        # Output Filtering Connections
+        conn_post_bg = nengo.Connection(
+            pre=fpga.output,
+            post=bg.input,
+            label='Post -> BG Connection'
+        )
+        conn_bg_thal = nengo.Connection(
+            pre=bg.output,
+            post=thal.input,
+            label='BG -> Thal Connection'
+        )
+        conn_thal_out = nengo.Connection(
+            pre=thal.output,
+            post=mov_out,
+            label='Action Output Connection'
+        )
+
+        # Learning Connections
+        conn_err_tra = nengo.Connection(
+            pre=err_tra,
+            post=err,
+            label='Error Transformation Connection'
+        )
+        conn_post_err = nengo.Connection(
+            pre=bg.input,
+            post=err_tra,
+            label='Post Feedback'
+        )
+        conn_learn = nengo.Connection(
+            pre=err,
+            post=fpga.error,
+            label='Learning Connection'
+        )
+
 
 def create_model():
     global model
@@ -431,7 +502,7 @@ def create_model():
             pre=pre,
             post=post,
             learning_rule_type=cvar.learning_rule_type,
-            # solver=cvar.solver_type,
+            solver=cvar.solver_type,
             label='Pre -> Post Connection',
         )
 
@@ -466,7 +537,6 @@ def create_model():
         conn_learn = nengo.Connection(
             pre=err,
             post=conn_pre_post.learning_rule,
-            # function=lambda x: [0.8, 0.7, 0.6, 0.5],
             label='Learning Connection'
         )
 
@@ -503,7 +573,7 @@ def web_gui():
         jobs = dpg.get_callback_queue()
         dpg.run_callbacks(jobs)
 
-        gui.update_text() # Update text boxes in the gui
+        gui.update_text(cvar.arena) # Update text boxes in the gui
         
         dpg.render_dearpygui_frame() # Render the updated frame to the GUI
         time.sleep(0.1)
@@ -556,4 +626,4 @@ if '__page__' in locals():
     # Create the model
     global model
     model: nengo.Network = None
-    create_model()
+    create_model_fpga()
