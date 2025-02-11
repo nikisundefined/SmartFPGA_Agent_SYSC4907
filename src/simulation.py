@@ -3,19 +3,26 @@
 import numpy as np
 import math
 import astar
+import logging
 from typing import Union
 from enum import IntEnum
 
+log: logging.Logger = logging.getLogger('simulation')
+
 class Point:
+
+    # Convert a 4D numpy array into a point represented as: [-Y, X, Y, -X]
     @classmethod
     def fromvector(cls, vec: np.ndarray) -> 'Point':
         assert vec.shape == (4,), f"Invalid shape for vector: {vec.shape}"
         return cls(vec[1] - vec[3], vec[2] - vec[0])
 
+    # Convert a Point object into a 4D vector of magnitudes represented as [-Y, X, Y, -X]
     def asmagnitude(self, dtype: np.dtype = np.float64) -> np.ndarray:
         tmp: np.ndarray = np.array([-self.y, self.x, self.y, -self.x], dtype=dtype)
         return np.maximum(tmp, np.zeros(tmp.shape))
     
+    # Convert a Point object into a direction based on the 
     def asdirection(self) -> 'Direction':
         if self.x > 1 or self.y > 1 or self.x < -1 or self.y < -1:
             raise ValueError(f"Point must contain only a single direction-like value: {self}")
@@ -26,9 +33,11 @@ class Point:
             return Direction.LEFT if self.x < 0 else Direction.RIGHT
         return Direction.UP if self.y < 0 else Direction.DOWN
     
+    # Get the absolute distance to another point
     def distance(self, other: 'Point') -> float:
         return math.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
     
+    # Return a copy of the current object
     def copy(self) -> 'Point':
         return Point(self.x, self.y)
 
@@ -36,6 +45,7 @@ class Point:
         self.x: int = x
         self.y: int = y
     
+    # Add 'Point'-like objects to this point object
     def __add__(self, other: Union['Point', 'Direction', 'Player']) -> 'Point':
         if other is Direction:
             return self + other.topoint()
@@ -44,6 +54,7 @@ class Point:
     def __sub__(self, other: 'Point') -> 'Point':
         return Point(self.x - other.x, self.y - other.y)
 
+    # Is this point less than another, defined as: p.x < o.x and p.y < o.y
     def __lt__(self, other: 'Point') -> bool:
         return self.x < other.x or self.y < other.y
     
@@ -68,12 +79,14 @@ class Point:
             'y': self.y
         }
         
+# An enumeration representing a direction on the grid
 class Direction(IntEnum):
     UP = 0
     RIGHT = 1
     DOWN = 2
     LEFT = 3
 
+    # Convert this direction into a 4D numpy vector
     def tovector(self) -> np.ndarray:
         match self:
             case self.UP:
@@ -85,14 +98,18 @@ class Direction(IntEnum):
             case self.LEFT:
                 return np.array([0, 0, 0, 1])
     
+    # Convert this direction into a point 
     def topoint(self) -> Point:
         return Point.fromvector(self.tovector())
 
+# Holds all information about the player
 class Player:
+    # Convert a point into a player
     @classmethod
     def frompoint(cls, p: Point) -> 'Player':
         return cls(p.x, p.y, 0, [])
     
+    # Convert a set of coordinates into a player
     @classmethod
     def fromcoordinate(cls, x: int, y: int) -> 'Player':
         return cls(x, y, 0, [])
@@ -102,9 +119,11 @@ class Player:
         self.score: int = score
         self.positions: list[Point] = positions
 
+    # Return a copy of this player object
     def copy(self) -> 'Player':
         return Player(self.point.x, self.point.y, self.score, self.positions.copy())
     
+    # Move the player in the specified direction
     def move(self, dir: Direction):
         match int(dir):
             case int(Direction.UP):
@@ -116,12 +135,14 @@ class Player:
             case int(Direction.RIGHT):
                 self.x += 1
     
+    # Adds a point to this player object (helper method to make math easier)
     def __add__(self, other: Point) -> Point:
         return Point(self.x + other.x, self.y + other.y)
 
     def __sub__(self, other: Point) -> Point:
         return Point(self.x - other.x, self.y - other.y)
 
+    # Increments the players score for when the player collects a goal
     def collect_goal(self):
         self.score += 100
     
@@ -138,6 +159,7 @@ class Player:
     def __hash__(self):
         return hash(str(self.__json__()))
 
+    # Attribute access to the x coordinate of the player
     @property
     def x(self) -> int:
         return self.point.x
@@ -146,6 +168,7 @@ class Player:
     def x(self, x: int) -> None:
         self.point.x = x
     
+    # Attribute access to the y coordinate of the player
     @property
     def y(self) -> int:
         return self.point.y
@@ -154,6 +177,7 @@ class Player:
     def y(self, y: int) -> None:
         self.point.y = y
 
+# Helper class for caching A* paths
 class PathPair:
     def __init__(self, start: Point, end: Point):
         self.start: Point = start.copy()
@@ -171,14 +195,15 @@ class PathPair:
     def __hash__(self) -> int:
         return hash(str(self))
 
+# The arena containing the player
 class Arena:
     EMPTY = 0
     WALL = 1
     PLAYER = 2
     GOAL = 3
 
-    _player_start: Point = Point(3,3)
-    _goal_start: Point = Point(11, 9)
+    _player_start: Point = Point(3,3) # Initial starting point for the player
+    _goal_start: Point = Point(11, 9) # Initial starting point for the goal
     
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n
@@ -200,6 +225,7 @@ class Arena:
     
     @classmethod
     def _create_grid(cls) -> np.ndarray:
+        # Generate the arena as a numpy array that is mirrored horizontally then vertically
         n_quad = 11
         grid_quad = np.array([
             [cls.WALL]*n_quad,
@@ -227,6 +253,7 @@ class Arena:
         grid[Arena._goal_start.y][Arena._goal_start.x] = cls.GOAL # Default goal position
         return grid
 
+    # Polymorphic method to access _tile_pnt and _tile_pos
     def _tile(self, *args, **kwargs) -> int:
         if type(args[0]) == int:
             return self._tile_pos(args[0], args[1])
@@ -254,9 +281,6 @@ class Arena:
         # Reset the tile on the grid incase we move the player
         self.grid[self.player.y][self.player.x] = self.EMPTY if not self.on_goal() else self.GOAL
 
-        # Keep a copy of the old position incase we need to 
-        # player_old_pos: Point = self.player.point.copy()
-
         # Check if the player is allowed to move in that direction
         match int(dir):
             case int(Direction.UP):
@@ -282,10 +306,6 @@ class Arena:
             self.player.y = 0
         elif self.player.y < 0:
             self.player.y = self.m - 1
-        
-        # Add the updated position to the list of player positions
-        # if player_old_pos != self.player:
-        #     self.player.positions.append(player_old_pos)
         
         # Update the grid to display the players location
         self.grid[self.player.y][self.player.x] = self.PLAYER
@@ -352,6 +372,7 @@ class Arena:
         assert start is not None and end is not None and pathKey is not None
         if pathKey in self.path.keys():
             return self.path[pathKey]
+        log.debug(f'  simulation.Arena: Distance cache miss {pathKey}')
 
         # Define function to calculate neighbors of points
         def neighbors(p: Point, arena: 'Arena' = self) -> list[Point]:
@@ -365,6 +386,7 @@ class Arena:
                     continue
                 if new_p.y < 0 or new_p.y >= arena.m:
                     continue
+                # If the point is inbounds add it to the list of valid neighbors
                 if arena.grid[new_p.y][new_p.x] != Arena.WALL:
                     ret.append(new_p)
             return ret
@@ -377,6 +399,7 @@ class Arena:
         self.path[pathKey] = tmp
         return tmp
     
+    # Textual representation of the grid
     def __str__(self) -> str:
         s: str = ""
         for x in range(self.grid.shape[0]):
@@ -392,6 +415,7 @@ class Arena:
             s += "\n"
         return s
 
+    # Converts the grid into a 2D texture with the given colors and block size
     def display(self, block_size: int = 10, wall_color: list[float] | None = None, player_color: list[float] | None = None, goal_color: list[float] | None = None) -> np.ndarray:
         COLOR_DEPTH: int = 4
         if wall_color is None:
