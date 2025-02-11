@@ -177,7 +177,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         # Error is the baseline value scaled by the inverse of the reward in the best direction
         err: np.ndarray = x # Set the error to the post to reset all values other than the best direction
         err_scale: float = (ERROR_CURVE / cvar.reward) # Factor to scale error by
-        err_val: float = (BASELINE_ERROR - x[best_direction]) * err_scale  # Compute the error value for the best direction
+        err_val: float = (x[best_direction] - BASELINE_ERROR) * err_scale  # Compute the error value for the best direction
         # Set the direction we want to go in to the computed error value
         err[best_direction] = err_val
         # Prevent the error from going beyond the baseline error value
