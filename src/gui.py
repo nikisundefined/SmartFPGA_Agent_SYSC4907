@@ -96,8 +96,7 @@ def display_gui():
     dpg.set_value('timer', time.time())
     dpg.set_primary_window("Pacman", True)
 
-def update_text(arena: simulation.Arena):
-    dpg.set_value('score', f'Score: {arena.player.score}')
+def update_text():
     start_time = dpg.get_value('timer')
     txt_rect = dpg.get_item_rect_size('score')
     dpg.set_item_pos('score', [dpg.get_viewport_width()/2-txt_rect[0]/2, 0])

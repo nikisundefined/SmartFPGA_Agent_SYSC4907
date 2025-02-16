@@ -8,6 +8,7 @@ from typing import Union
 from enum import IntEnum
 
 log: logging.Logger = logging.getLogger('simulation')
+log.setLevel(logging.DEBUG)
 
 class Point:
 
@@ -276,6 +277,19 @@ class Arena:
     def on_goal(self) -> bool:
         return self.player == self.goal
     
+    # Returns the best direction to go if starting at start and going to end
+    def best_direction(self, start: Point | None = None, end: Point | None = None) -> Direction:
+        # Set defaults for start and end
+        if start is None:
+            start = self.player.point
+        if end is None:
+            end = self.goal
+        # Get the best path to the goal
+        path: list[Point] = self.distance(start, end)
+        # Compute the best direction based on the best path
+        delta_dist: Point = path[1] - start
+        return Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
+    
     def move(self, dir: Direction) -> None:
         """Moves the player in the direction given"""
         # Reset the tile on the grid incase we move the player
@@ -294,7 +308,7 @@ class Arena:
                 if self.player.x == 0 or self._tile(self.player, offset_x=-1) != self.WALL:
                     self.player.move(dir)
             case int(Direction.RIGHT):
-                if self.player.x == 22 or self._tile(self.player, offset_x=1) != self.WALL:
+                if self.player.x == self.n - 1 or self._tile(self.player, offset_x=1) != self.WALL:
                     self.player.move(dir)
         
         # Ensure the player is within the bounds of the arena
@@ -362,6 +376,7 @@ class Arena:
     
     # The distance between two points in the grid using the A* algorithm
     def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
+        global log
         # Set defaults for the start and end positions
         if start is None:
             start = self.player.point
@@ -382,6 +397,12 @@ class Arena:
             for _p in points:
                 # If point is inbounds and not a wall, add it to the list
                 new_p: Point = _p + p
+                if new_p.y == 11: # TODO: Check if this value needs to be hardcoded
+                    # Check if we need to consider wrapping
+                    if new_p.x < 0:
+                        new_p.x = arena.n - 1
+                    elif new_p.y > arena.n:
+                        new_p.x = 0
                 if new_p.x < 0 or new_p.x >= arena.n:
                     continue
                 if new_p.y < 0 or new_p.y >= arena.m:
@@ -397,6 +418,7 @@ class Arena:
             tmp = [p for p in tmp]
         # Update the path cache
         self.path[pathKey] = tmp
+        log.debug(f'  Computed path from {start} to {end} as: {tmp}')
         return tmp
     
     # Textual representation of the grid
@@ -483,18 +505,34 @@ def main():
 
 if __name__ == "__main__":
     import sys
+    import os
+    import concurrent.futures
     n = 23 # X length
     m = 23 # Y length
     arena = Arena(n, m)
     grid = arena.grid
-    key: str = ""
 
-    dist = [p for p in arena.distance()]
-    print(f'Path length: {len(dist)}')
-    print('Path taken: ')
-    for s in dist:
-        print(f"  {s}")
+    def get_path(start: Point) -> list[list[Point] | None]:
+        ret: list[list[Point] | None] = []
+        for end_x in range(arena.n):
+            for end_y in range(arena.m):
+                if grid[end_y][end_x] != Arena.WALL:
+                    ret += arena.distance(start, Point(end_x, end_y))
+        return ret
 
+    max_val: int = 0
+    points: list[Point] = filter(lambda x: grid[x.y][x.y] != Arena.WALL, (Point(x, y) for x, y in zip(range(n), range(m))))
+    with concurrent.futures.ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        for path in executor.map(get_path, points):
+            max_val = max(max_val, len(path))
+
+                
+    import json
+    def default(o):
+        if hasattr(o, '__json__'):
+            return o.__json__()
+        raise TypeError()
+    json.dumps(arena.path, default=default)
 
     if len(sys.argv) > 1 and sys.argv[1] == '-i':
         main()

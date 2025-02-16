@@ -22,9 +22,28 @@ from simulation import Arena, Direction, Point, Player
 # NOTE: 
 #   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
 #   Scale Super/Sub reward state error differently (Super state = scale global error, Sub state = scale directional error)
+#   Current version resets reward on collection of goal
+#   Consider increasing the error for the second best move in the path
+#   Consider making a web based display to allow running the model truely headless
 
 # TODO:
-#   Increase the error for the second best move in the path
+#   Add toggle for alternate input method
+#       - Find better inputs
+#   Check if the model is actually learning or just adapting based on the error
+#       - Check this with performance characteristics
+#   Update score in local gui
+#   Make error function tend to be more punishing
+#   Add more tracking in player class (Steps to reach goal, Reward value, Time taken)
+#   Add performance characteristics:
+#       - Time per goal
+#       - Movements per goal
+#       - Reward Value at goal
+#   Validate best path can properly wrap
+#   Change error scale function
+#   Cleanup main script code
+#   Generate list of hyperparameters for optimization phase
+#       - Learning Rate
+#       - Error Baseline
 
 @dataclass
 class AttrDict:
@@ -39,9 +58,9 @@ class AttrDict:
     # The adaptive factor used with the Adaptive LIF neuron type
     tau_n: float = 0.01
     # Neuron type used in all ensembles
-    neuron_type: nengo.neurons.NeuronType = nengo.neurons.AdaptiveLIF(tau_n=tau_n)
+    neuron_type: nengo.neurons.NeuronType = nengo.neurons.SpikingRectifiedLinear()
     # Solver type used for learning connections
-    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqMultNoise(weights=False)
+    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True)
     # Learning rule used for learning connections
     learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate, pre_synapse=None)
     # Number of dimensions input to the model
@@ -64,8 +83,10 @@ class AttrDict:
     in_gui: bool = False
     # Flag if the current action moved away from the goal
     moved_away_from_goal: int = 0
+    # The synapse used for the connection between pre and post ensembles
+    connection_synapse = 0.01
     # The logging level for the script to print out
-    log_level: str | int = int(logging.INFO)
+    log_level: str | int = int(logging.DEBUG)
     
     def export(self) -> str:
         class JsonEncoder(json.JSONEncoder):
@@ -111,6 +132,17 @@ def goal_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     tmp: Point = cvar.arena.player - cvar.arena.goal
     return tmp.asmagnitude(dtype=cvar.dtype)
 
+# Returns the distance to the goal as the length of the path calculated using the A* algorithm
+def goal_path_distance(t: float, cvar: AttrDict = cvar) -> int:
+    return len(cvar.arena.distance()) / 30.0
+
+def goal_best_direction(t: float, cvar: AttrDict = cvar) -> float:
+    return (int(cvar.arena.best_direction()) + 1) / 5.0
+
+def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
+    delta: Point = cvar.arena.player.point - cvar.arena.goal
+    return np.array([delta.x, delta.y], dtype=cvar.dtype) / 23.0
+
 ### End Input Node Functions ###
 
 ### Output Node Functions ###
@@ -152,9 +184,8 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     # Update the goal location when the agent reaches the goal
     if cvar.arena.on_goal():
         log.info("  Agent reached the goal")
+        log.debug(f"  Player score is now: {cvar.arena.player.score}")
         cvar.arena.set_goal()
-        # if np.any(cvar.reward < 0):
-        #     cvar.reward = 0
     cvar.action_performed = True
 
     if cvar.in_gui:
@@ -165,14 +196,10 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 ### Error Function ###
 
 # Calculates the error of the model inputs to outputs based on:
-# NOTE: Differences of points (e.g. Goal and Player) are given as the absolute distances in the 4 directions North, East, South, West (NESW)
-#   - The last location of the agent (LL)
-#   - The distance from the agent to the goal (GL)
-#   - The detection distance in all directions (SD)
 def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     BASELINE_ERROR: float = 0.8 # The maximum value for the error
     ERROR_CURVE: float = 2.0
-
+    
     def err_calc(best_direction: Direction, x: np.ndarray = x, cvar: AttrDict = cvar):
         # Error is the baseline value scaled by the inverse of the reward in the best direction
         err: np.ndarray = x # Set the error to the post to reset all values other than the best direction
@@ -187,7 +214,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the best path to the goal
     path: list[Point] = cvar.arena.distance()
     # Compute the best direction based on the best path
-    best_direction: Direction = (path[1] - cvar.arena.player.point).asdirection()
+    delta_dist: Point = path[1] - cvar.arena.player.point
+    best_direction: Direction = Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == 22 else delta_dist.asdirection()
 
     # Compute the error for an early return
     err = err_calc(best_direction)
@@ -256,90 +284,6 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     
     return err
 
-# NOTE: this is actually the old error equation, DO NOT USE
-# NOTE: Deprecated
-# def error_new(t: float, x: np.ndarray, cvar: AttrDict = cvar):
-#     """
-#     dis_to_goal = root((Xc-Xg)^2 + (Yx-Yg)^2)
-#     reward(t) = + goal_w * (previous_distance - dis_to_goal) if moved towards
-#             - wall_w * wall_penalty              if hits wall
-#             - goal_w * (dis_to_goal - previous_distance) if moves away 
-#             0  if no change
-
-#     goal_w = scaling factor
-#     wall_w = scaling factor
-#     wall_penalty = binary variable (1/0)
-
-#     error calc:
-
-#     error = reward(t) + d_f * expected_reward_ns - expected_reward
-
-#     learning rate lr = 
-#     weight_update = lr * error * si(t) * sj(t)
-
-#     si = pre
-#     sj = post
-# """
-#     #d_f: float = 0.9 # Discount factor
-
-#     def reward(player: Point, goal: Point, previous_position: Point, cvar: AttrDict = cvar):
-#         GOAL_W: float = 0.6 # Weight of the goal
-#         WALL_W: float = 0.3 # Weight of hitting the wall
-#         WALL_PENALTY: float = 1.0 # The penalty for hitting a wall
-#         # The minimum number of steps to the goal
-#         dis_to_goal: int = len(cvar.arena.distance())
-#         # The previous distance to the goal
-#         previous_distance: int = len(cvar.arena.distance(start=previous_position))
-#         # Did the agent move towards the goal (absolute distance)
-#         moved_towards_goal: bool = dis_to_goal < previous_distance
-#         # Did the agent hit the wall (last action caused the agent to not move and move into a wall)
-#         hit_wall: bool = player == previous_position
-
-#         #print(f'Moved towards goal: {moved_towards_goal} [{dis_to_goal} < {previous_distance}] {player} {goal} {previous_position} | {cvar.arena.player.positions}')
-
-#         reward: float = 0
-#         if moved_towards_goal:
-#             reward += GOAL_W * (previous_distance - dis_to_goal)
-#         elif cvar.player_moved:
-#             reward -= GOAL_W * (dis_to_goal - previous_distance)
-#         if hit_wall and cvar.action_performed:
-#             reward -= WALL_W * WALL_PENALTY
-#         if len(set(cvar.arena.player.positions[:-5])) < 3 and len(cvar.arena.player.positions) > 5:
-#             reward -= WALL_W * WALL_PENALTY
-#         return reward
-    
-#     path: list[Point] = cvar.arena.distance() # Compute the shortest path to the goal
-#     #expected_reward_ns: float = reward(path[0], cvar.arena.goal, cvar.arena.player.point)
-#     # Error is given as the difference of reward values
-#     if math.isclose(t,int(t)):
-#         reward_value: float = reward(
-#                 cvar.arena.player.point, 
-#                 cvar.arena.goal, 
-#                 cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
-#             )
-#         # error: np.ndarray = np.array(
-#         #     [reward(cvar.arena.player.point + Direction.UP.topoint(), cvar.arena.goal, cvar.arena.player.point), 
-#         #     reward(cvar.arena.player.point + Direction.RIGHT.topoint(), cvar.arena.goal, cvar.arena.player.point),
-#         #     reward(cvar.arena.player.point + Direction.DOWN.topoint(), cvar.arena.goal, cvar.arena.player.point),
-#         #     reward(cvar.arena.player.point + Direction.LEFT.topoint(), cvar.arena.goal, cvar.arena.player.point)]
-#         # )
-#         error: np.ndarray = np.zeros(4)
-#         error[(cvar.arena.player.point - path[1]).asmagnitude().argmax()] = -reward_value
-#         error = error + 0.1 * cvar.reward
-#         cvar.reward = error
-#         print(f"Reward Value: {error}")
-#     else:
-#         error = cvar.reward
-#     # error: np.ndarray = np.ones(4) * reward_value - x[:4] * np.clip(x[4:], a_min=0, a_max=4/23)
-#     # player_last_pos: Point = cvar.arena.player.positions[-1] if len(cvar.arena.player.positions) > 0 else cvar.arena.player.point
-    
-#     # if path is not None and len(path) > 2:
-#     #     error = error - (cvar.arena.player - path[0]).asmagnitude(cvar.dtype) * 0.01
-#     #cvar.expected_reward = expected_reward_ns # Store the expected reward for the next step
-    
-#     # error = error.clip(-1, 1)
-#     return error
-
 # Get the distance to a wall in every direction starting from the agent
 def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the detection information from the arena
@@ -362,6 +306,22 @@ def create_model_fpga():
             size_out=cvar.input_dimensions,
             label='Distance Input Node'
         )
+        g_dist = nengo.Node(
+            output=goal_path_distance,
+            size_out=1,
+            label='Goal Path Distance'
+        )
+        best_dir = nengo.Node(
+            output=goal_best_direction,
+            size_out=1,
+            label='Goal Best Direction'
+        )
+        g_pnt = nengo.Node(
+            output=goal_point_distance,
+            size_out=2,
+            label='Goal Point Distance'
+        )
+
         # Movement output
         mov_out = nengo.Node(
             output=move,
@@ -389,6 +349,10 @@ def create_model_fpga():
             learning_rate=cvar.learning_rate,
             label='FPGA'
         )
+        if cvar.neuron_type in [nengo.neurons.SpikingRectifiedLinear, nengo.neurons.RectifiedLinear]:
+            fpga.ensemble.neuron_type = cvar.neuron_type
+        fpga.connection.solver = cvar.solver_type
+        fpga.connection.synapse = cvar.connection_synapse
         err = nengo.Ensemble(
             n_neurons=cvar.ensemble_neurons,
             dimensions=cvar.output_dimensions,
@@ -402,6 +366,22 @@ def create_model_fpga():
             post=fpga.input,
             label='Distance Input Connection',
         )
+        # conn_g_dist_in = nengo.Connection(
+        #     pre=g_dist,
+        #     post=fpga.input[0],
+        #     label='Goal Distance Input'
+        # )
+        # conn_best_dir_in = nengo.Connection(
+        #     pre=best_dir,
+        #     post=fpga.input[1],
+        #     label='Best Direction Input'
+        # )
+        # conn_pnt_dist_in = nengo.Connection(
+        #     pre=g_pnt,
+        #     post=fpga.input[2:],
+        #     label='Goal Point Distance Input'
+        # )
+
 
         # Output Filtering Connections
         conn_post_bg = nengo.Connection(
@@ -498,9 +478,11 @@ def create_model():
             post=pre,
             label='Distance Input Connection',
         )
+        # conn_inp = nengo.Connection()
         conn_pre_post = nengo.Connection(
             pre=pre,
             post=post,
+            synapse=cvar.connection_synapse,
             learning_rule_type=cvar.learning_rule_type,
             solver=cvar.solver_type,
             label='Pre -> Post Connection',
@@ -573,8 +555,9 @@ def web_gui():
         jobs = dpg.get_callback_queue()
         dpg.run_callbacks(jobs)
 
-        gui.update_text(cvar.arena) # Update text boxes in the gui
-        
+        gui.update_text() # Update text boxes in the gui
+        dpg.set_value('score', f'Score: {cvar.arena.player.score}')
+
         dpg.render_dearpygui_frame() # Render the updated frame to the GUI
         time.sleep(0.1)
     dpg.destroy_context()
