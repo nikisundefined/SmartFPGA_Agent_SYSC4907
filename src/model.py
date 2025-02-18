@@ -243,7 +243,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     path: list[Point] = cvar.arena.distance()
     # Compute the best direction based on the best path
     delta_dist: Point = 0 if len(path) < 2 else path[1] - cvar.arena.player.point
-    best_direction: Direction = Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == 22 else delta_dist.asdirection()
+    best_direction: Direction = Point(-np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == 22 else delta_dist.asdirection()
 
     # Compute the error for an early return
     err = err_calc(best_direction)
@@ -257,7 +257,15 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
 
     # Compute the reward value for the current timestep
     def reward(player: Player, player_moved: bool, path: list[Point]) -> float:
-        MOVEMENT_REWARD: float = 1.0 # The rewarda for moving (doubles as the penalty for not moving)
+        # Reward and punishment values
+        MOVEMENT_REWARD: float = 1.0
+        HALT_PENALTY: float = 5.0
+        TOWARDS_GOAL_REWARD: float = 2.0
+        AWAY_FROM_GOAL_PENALTY: float = 2.0
+        VERY_AWAY_FROM_GOAL_PENALTY: float = 3.0
+        HIT_WALL_PENALTY: float = 5.0
+        REPEAT_POSITIONS_PENALTY: float = 2.0
+        MANY_REPEAT_POSITIONS_PENALTY: float = 4.0
 
         # The number of steps to the goal (minus the current [0] and goal [len - 1] locations)
         dist_to_goal: int = len(path) - 2
@@ -268,12 +276,16 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         # Did the agent hit a wall in this timestep
         hit_wall: bool = player.positions[-1] == player.point
 
-        reward: float = 0.0
+        # If the player did not move no other reward calculation is needed
+        if not player_moved:
+            return -HALT_PENALTY
+
         # Reward the agent for moving and punish for not moving
-        reward += MOVEMENT_REWARD if player_moved else -MOVEMENT_REWARD
+        reward: float = MOVEMENT_REWARD if player else 0.0
+        
         # Reward the agent for moving towards the goal
         if moved_towards_goal:
-            reward += 2 * MOVEMENT_REWARD
+            reward += TOWARDS_GOAL_REWARD
             # Reset the counter for moving away from the goal
             cvar.moved_away_from_goal = 0
         else:
@@ -282,21 +294,21 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
             # If the last 2 movements mvoed away from the goal
             if cvar.moved_away_from_goal == 2:
                 # Punish it more
-                reward -= 3 * MOVEMENT_REWARD
+                reward -= VERY_AWAY_FROM_GOAL_PENALTY
                 cvar.moved_away_from_goal = 0
             else:
-                reward -= MOVEMENT_REWARD
+                reward -= AWAY_FROM_GOAL_PENALTY
         # Punish the agent for moving/hitting a wall
         if hit_wall:
-            reward -= 2 * MOVEMENT_REWARD
+            reward -= HIT_WALL_PENALTY
         # Punish the agent for returning to the same points
         if len(player.positions) > 5:
             unique_positions: int = len(set(player.positions[-5:]))
             log.debug(f"  Unique Positions: {unique_positions}")
             if unique_positions <= 2:
-                reward -= 3 * MOVEMENT_REWARD
+                reward -= REPEAT_POSITIONS_PENALTY
             elif unique_positions <= 4:
-                reward -= MOVEMENT_REWARD
+                reward -= MANY_REPEAT_POSITIONS_PENALTY
         log.debug(f"  Instantaneous Reward: {reward}")
         return reward
 
