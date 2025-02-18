@@ -16,19 +16,18 @@ import time
 import dearpygui.dearpygui as dpg
 import pause
 import threading
+from pathlib import Path
 from dataclasses import dataclass
-from simulation import Arena, Direction, Point, Player
+from simulation import Arena, Direction, Point, Player, PathPair
 
 # NOTE: 
 #   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
 #   Scale Super/Sub reward state error differently (Super state = scale global error, Sub state = scale directional error)
-#   Current version resets reward on collection of goal
 #   Consider increasing the error for the second best move in the path
 #   Consider making a web based display to allow running the model truely headless
 
 # TODO:
-#   Add toggle for alternate input method
-#       - Find better inputs
+#   Find better inputs
 #   Check if the model is actually learning or just adapting based on the error
 #       - Check this with performance characteristics
 #   Update score in local gui
@@ -38,9 +37,6 @@ from simulation import Arena, Direction, Point, Player
 #       - Time per goal
 #       - Movements per goal
 #       - Reward Value at goal
-#   Validate best path can properly wrap
-#   Change error scale function
-#   Cleanup main script code
 #   Generate list of hyperparameters for optimization phase
 #       - Learning Rate
 #       - Error Baseline
@@ -87,6 +83,12 @@ class AttrDict:
     connection_synapse = 0.01
     # The logging level for the script to print out
     log_level: str | int = int(logging.DEBUG)
+    # Path to the A* path cache file
+    path_cache_file: Path = Path(__file__).parent.parent / 'path_cache.json'
+    # Selector for the alternate set of inputs to the model (Only useful with the fpga model)
+    alt_input: bool = True
+    # Should the reward reset after collecting a goal
+    reward_reset: bool = False
     
     def export(self) -> str:
         class JsonEncoder(json.JSONEncoder):
@@ -104,6 +106,19 @@ class AttrDict:
 # Setup the variables for the model
 cvar: AttrDict = AttrDict()
 log = logging.getLogger('simulation')
+
+if cvar.path_cache_file.exists():
+    import json
+    # Load path cache
+    log.debug(f'Found path cache file at: {cvar.path_cache_file}')
+    jstr: str = Path.read_text(cvar.path_cache_file)
+    for pair, path in json.loads(jstr).items():
+        pair = PathPair.fromstr(pair)
+        if path is not None:
+            path = [{k: int(v) for k, v in p.items()} for p in path]
+            path = [Point(**kwargs) for kwargs in path]
+        cvar.arena.path[pair] = path
+    log.debug(f"Loaded {len(cvar.arena.path)} paths from cache")
 
 ### Input Node Functions ###
 
@@ -186,7 +201,10 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         log.info("  Agent reached the goal")
         log.debug(f"  Player score is now: {cvar.arena.player.score}")
         cvar.arena.set_goal()
+        if cvar.reward_reset:
+            cvar.reward = 1.0
     cvar.action_performed = True
+    log.debug(f"  Current detection: {detection(0)}")
 
     if cvar.in_gui:
         gui.update_grid(cvar.arena)
@@ -203,7 +221,17 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     def err_calc(best_direction: Direction, x: np.ndarray = x, cvar: AttrDict = cvar):
         # Error is the baseline value scaled by the inverse of the reward in the best direction
         err: np.ndarray = x # Set the error to the post to reset all values other than the best direction
-        err_scale: float = (ERROR_CURVE / cvar.reward) # Factor to scale error by
+        # New error scaling equation
+        # f(x) = {
+        #   E / x + 0.0.1; x >= 50
+        #   sqrt(-(x - 50)) / 8 + 0.25; 1 <= x < 50
+        #}
+        if cvar.reward >= 50:
+            ERROR_CURVE = 12.0
+            err_scale: float = ERROR_CURVE / cvar.reward + 0.01
+        else:
+            err_scale: float = math.sqrt(-(cvar.reward - 50)) / 8 + 0.25
+        # err_scale: float = (ERROR_CURVE / cvar.reward) # Factor to scale error by
         err_val: float = (x[best_direction] - BASELINE_ERROR) * err_scale  # Compute the error value for the best direction
         # Set the direction we want to go in to the computed error value
         err[best_direction] = err_val
@@ -214,7 +242,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the best path to the goal
     path: list[Point] = cvar.arena.distance()
     # Compute the best direction based on the best path
-    delta_dist: Point = path[1] - cvar.arena.player.point
+    delta_dist: Point = 0 if len(path) < 2 else path[1] - cvar.arena.player.point
     best_direction: Direction = Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == 22 else delta_dist.asdirection()
 
     # Compute the error for an early return
@@ -335,6 +363,7 @@ def create_model_fpga():
             size_out=cvar.output_dimensions,
             label='Error Compute',
         )
+        # Node to be able to view reward in nengo gui
         nreward = nengo.Node(
             output=lambda x: cvar.reward,
             size_out=1,
@@ -361,26 +390,28 @@ def create_model_fpga():
         )
 
         # Processing Connections
-        conn_dist_in = nengo.Connection(
-            pre=dist_in,
-            post=fpga.input,
-            label='Distance Input Connection',
-        )
-        # conn_g_dist_in = nengo.Connection(
-        #     pre=g_dist,
-        #     post=fpga.input[0],
-        #     label='Goal Distance Input'
-        # )
-        # conn_best_dir_in = nengo.Connection(
-        #     pre=best_dir,
-        #     post=fpga.input[1],
-        #     label='Best Direction Input'
-        # )
-        # conn_pnt_dist_in = nengo.Connection(
-        #     pre=g_pnt,
-        #     post=fpga.input[2:],
-        #     label='Goal Point Distance Input'
-        # )
+        if not cvar.alt_input:
+            conn_dist_in = nengo.Connection(
+                pre=dist_in,
+                post=fpga.input,
+                label='Distance Input Connection',
+            )
+        else:
+            conn_g_dist_in = nengo.Connection(
+                pre=g_dist,
+                post=fpga.input[0],
+                label='Goal Distance Input'
+            )
+            conn_best_dir_in = nengo.Connection(
+                pre=best_dir,
+                post=fpga.input[1],
+                label='Best Direction Input'
+            )
+            conn_pnt_dist_in = nengo.Connection(
+                pre=g_pnt,
+                post=fpga.input[2:],
+                label='Goal Point Distance Input'
+            )
 
 
         # Output Filtering Connections
@@ -416,7 +447,6 @@ def create_model_fpga():
             post=fpga.error,
             label='Learning Connection'
         )
-
 
 def create_model():
     global model

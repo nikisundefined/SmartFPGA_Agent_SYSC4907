@@ -76,8 +76,8 @@ class Point:
 
     def __json__(self) -> dict[str]:
         return {
-            'x': self.x,
-            'y': self.y
+            'x': int(self.x),
+            'y': int(self.y)
         }
         
 # An enumeration representing a direction on the grid
@@ -180,6 +180,17 @@ class Player:
 
 # Helper class for caching A* paths
 class PathPair:
+    @classmethod
+    def fromstr(cls, s: str) -> 'PathPair':
+        s = s.strip('[]')
+        nums = s.split(',')
+
+        p = []
+        for num in nums:
+            num = num.strip(' ()')
+            p.append(int(num))
+        return cls(Point(p[0], p[1]), Point(p[2], p[3]))
+
     def __init__(self, start: Point, end: Point):
         self.start: Point = start.copy()
         self.end: Point = end.copy()
@@ -397,16 +408,16 @@ class Arena:
             for _p in points:
                 # If point is inbounds and not a wall, add it to the list
                 new_p: Point = _p + p
-                if new_p.y == 11: # TODO: Check if this value needs to be hardcoded
-                    # Check if we need to consider wrapping
-                    if new_p.x < 0:
-                        new_p.x = arena.n - 1
-                    elif new_p.y > arena.n:
-                        new_p.x = 0
-                if new_p.x < 0 or new_p.x >= arena.n:
-                    continue
-                if new_p.y < 0 or new_p.y >= arena.m:
-                    continue
+
+                if new_p.x == self.n:
+                    new_p.x = 0
+                elif new_p.x < 0:
+                    new_p.x = self.n - 1
+                elif new_p.y == self.m:
+                    new_p.y = 0
+                elif new_p.y < 0:
+                    new_p.y = self.m - 1
+
                 # If the point is inbounds add it to the list of valid neighbors
                 if arena.grid[new_p.y][new_p.x] != Arena.WALL:
                     ret.append(new_p)
@@ -517,22 +528,32 @@ if __name__ == "__main__":
         for end_x in range(arena.n):
             for end_y in range(arena.m):
                 if grid[end_y][end_x] != Arena.WALL:
-                    ret += arena.distance(start, Point(end_x, end_y))
+                    dist = arena.distance(start, Point(end_x, end_y))
+                    ret.append(dist)
         return ret
 
     max_val: int = 0
     points: list[Point] = filter(lambda x: grid[x.y][x.y] != Arena.WALL, (Point(x, y) for x, y in zip(range(n), range(m))))
-    with concurrent.futures.ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         for path in executor.map(get_path, points):
             max_val = max(max_val, len(path))
-
+    print(f"Longest path is: {max_val}")
                 
     import json
     def default(o):
         if hasattr(o, '__json__'):
             return o.__json__()
-        raise TypeError()
-    json.dumps(arena.path, default=default)
+        if isinstance(o, int):
+            return int(o)
+        return repr(o)
+    p = {}
+    for k, v in arena.path.items():
+        if v is not None:
+            p[str(k)] = [i.__json__() for i in v]
+        else:
+            p[str(k)] = None
+    with open('../path_cache.json', 'w') as f:
+        json.dump(p, f)
 
     if len(sys.argv) > 1 and sys.argv[1] == '-i':
         main()
