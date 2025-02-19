@@ -27,11 +27,12 @@ from simulation import Arena, Direction, Point, Player, PathPair
 #   Consider making a web based display to allow running the model truely headless
 
 # TODO:
+#   Make gui generic to allow implementation of generic gui callbacks
+#   Create web ui interface
 #   Find better inputs
 #   Check if the model is actually learning or just adapting based on the error
 #       - Check this with performance characteristics
 #   Update score in local gui
-#   Make error function tend to be more punishing
 #   Add more tracking in player class (Steps to reach goal, Reward value, Time taken)
 #   Add performance characteristics:
 #       - Time per goal
@@ -166,7 +167,7 @@ def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
 # Only moves the agent every 1 second
 def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if t == 0.0 and x is None and cvar.in_gui:
-        dpg.set_value('timer', time.time()) # Reset the timer if the model was reloaded
+        gui.update_text(start_time=time.time())
     if not math.isclose(t, int(t)):
         return
     log.info(f"Move at {round(t, 2)}")
@@ -199,8 +200,10 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     # Update the goal location when the agent reaches the goal
     if cvar.arena.on_goal():
         log.info("  Agent reached the goal")
-        log.debug(f"  Player score is now: {cvar.arena.player.score}")
         cvar.arena.set_goal()
+        log.debug(f"  Player score is now: {cvar.arena.player.score}")
+        if cvar.in_gui:
+            gui.update_text(score=cvar.arena.player.score)
         if cvar.reward_reset:
             cvar.reward = 1.0
     cvar.action_performed = True
@@ -598,7 +601,6 @@ def web_gui():
         dpg.run_callbacks(jobs)
 
         gui.update_text() # Update text boxes in the gui
-        dpg.set_value('score', f'Score: {cvar.arena.player.score}')
 
         dpg.render_dearpygui_frame() # Render the updated frame to the GUI
         time.sleep(0.1)

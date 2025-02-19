@@ -96,8 +96,12 @@ def display_gui():
     dpg.set_value('timer', time.time())
     dpg.set_primary_window("Pacman", True)
 
-def update_text():
+def update_text(score: int | None = None, start_time: float | None = None):
+    if start_time is not None:
+        dpg.set_value('timer', start_time)
     start_time = dpg.get_value('timer')
+    if score is not None:
+        dpg.set_value('score', f'Score: {score}')
     txt_rect = dpg.get_item_rect_size('score')
     dpg.set_item_pos('score', [dpg.get_viewport_width()/2-txt_rect[0]/2, 0])
     tim_rect = dpg.get_item_rect_size('time')
