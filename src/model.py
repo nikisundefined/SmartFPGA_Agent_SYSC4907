@@ -110,7 +110,7 @@ log = logging.getLogger('simulation')
 if cvar.path_cache_file.exists():
     import json
     # Load path cache
-    log.debug(f'Found path cache file at: {cvar.path_cache_file}')
+    log.info(f'Found path cache file at: {cvar.path_cache_file.absolute()}')
     jstr: str = Path.read_text(cvar.path_cache_file)
     for pair, path in json.loads(jstr).items():
         pair = PathPair.fromstr(pair)
@@ -118,7 +118,7 @@ if cvar.path_cache_file.exists():
             path = [{k: int(v) for k, v in p.items()} for p in path]
             path = [Point(**kwargs) for kwargs in path]
         cvar.arena.path[pair] = path
-    log.debug(f"Loaded {len(cvar.arena.path)} paths from cache")
+    log.info(f"Loaded {len(cvar.arena.path)} paths from cache")
 
 ### Input Node Functions ###
 

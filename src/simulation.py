@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import multiprocessing.synchronize
 import numpy as np
 import math
 import astar
@@ -398,7 +399,7 @@ class Arena:
         assert start is not None and end is not None and pathKey is not None
         if pathKey in self.path.keys():
             return self.path[pathKey]
-        log.debug(f'  simulation.Arena: Distance cache miss {pathKey}')
+        log.warning(f'  simulation.Arena: Distance cache miss {pathKey}')
 
         # Define function to calculate neighbors of points
         def neighbors(p: Point, arena: 'Arena' = self) -> list[Point]:
@@ -518,27 +519,52 @@ if __name__ == "__main__":
     import sys
     import os
     import concurrent.futures
+    import threading
+    import pathlib
+    import multiprocessing
     n = 23 # X length
     m = 23 # Y length
     arena = Arena(n, m)
     grid = arena.grid
 
-    def get_path(start: Point) -> list[list[Point] | None]:
-        ret: list[list[Point] | None] = []
-        for end_x in range(arena.n):
-            for end_y in range(arena.m):
-                if grid[end_y][end_x] != Arena.WALL:
-                    dist = arena.distance(start, Point(end_x, end_y))
-                    ret.append(dist)
-        return ret
+    # Generate all points in the grid
+    points: list[Point] = []
+    for x in range(n):
+        for y in range(m):
+            points.append(Point(x, y))
+    # Filter out all the points that the agent can go to
+    points = list(filter(lambda x: grid[x.y][x.x] != Arena.WALL, points))
 
-    max_val: int = 0
-    points: list[Point] = filter(lambda x: grid[x.y][x.y] != Arena.WALL, (Point(x, y) for x, y in zip(range(n), range(m))))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        for path in executor.map(get_path, points):
-            max_val = max(max_val, len(path))
-    print(f"Longest path is: {max_val}")
-                
+    lock: threading.Lock = threading.Lock()
+    path_count = multiprocessing.Value('I', 0)
+    def generate_path(start, end) -> list[Point] | None:
+        global path_count
+        tmp = arena.distance(start, end)
+        with lock:
+            path_count.value += 1
+            print(f'Computed Path: {path_count.value}', end='\r')
+        return tmp
+
+    paths: dict[PathPair, list[Point] | None | concurrent.futures.Future[list[Point]]] = {}
+    max_len: int = 0
+    with concurrent.futures.ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        for start in points:
+            for end in points:
+                future = executor.submit(generate_path, start, end)
+                paths.setdefault(PathPair(start, end), future)
+
+    p = {}
+    for k, f in paths.items():
+        result = f.result()
+        max_len = max(len(result if result is not None else []), max_len)
+
+        if result is not None:
+            p[str(k)] = [i.__json__() for i in result]
+        else:
+            p[str(k)] = None
+    print(f"Longest path of {len(paths)} paths is: {max_len}")
+
+    # Export the generated paths to the cache file
     import json
     def default(o):
         if hasattr(o, '__json__'):
@@ -546,13 +572,8 @@ if __name__ == "__main__":
         if isinstance(o, int):
             return int(o)
         return repr(o)
-    p = {}
-    for k, v in arena.path.items():
-        if v is not None:
-            p[str(k)] = [i.__json__() for i in v]
-        else:
-            p[str(k)] = None
-    with open('../path_cache.json', 'w') as f:
+
+    with open(pathlib.Path(__file__).parent.parent / 'path_cache.json', 'w') as f:
         json.dump(p, f)
 
     if len(sys.argv) > 1 and sys.argv[1] == '-i':

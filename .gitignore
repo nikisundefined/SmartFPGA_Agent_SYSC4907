@@ -3,3 +3,4 @@ arena.png
 .vscode
 .conda
 .venv
+path_cache.json
