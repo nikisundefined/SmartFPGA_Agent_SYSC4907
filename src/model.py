@@ -13,6 +13,7 @@ import nengo_fpga.networks
 import numpy as np
 import gui
 import time
+import multiprocessing
 import dearpygui.dearpygui as dpg
 import pause
 import threading
@@ -27,12 +28,14 @@ from simulation import Arena, Direction, Point, Player, PathPair
 #   Consider making a web based display to allow running the model truely headless
 
 # TODO:
-#   Make gui generic to allow implementation of generic gui callbacks
 #   Create web ui interface
+#   Convert cvars into shared memory
 #   Find better inputs
+#       - Player Position
+#       - Goal Position
+#       - Detection Distance
 #   Check if the model is actually learning or just adapting based on the error
 #       - Check this with performance characteristics
-#   Update score in local gui
 #   Add more tracking in player class (Steps to reach goal, Reward value, Time taken)
 #   Add performance characteristics:
 #       - Time per goal
@@ -41,6 +44,10 @@ from simulation import Arena, Direction, Point, Player, PathPair
 #   Generate list of hyperparameters for optimization phase
 #       - Learning Rate
 #       - Error Baseline
+#       - Reward Factors
+#       - Neuron Count
+#   Local GUI Cannot share data with the nengo gui due, since the script is compiled with all variables stripped
+#       - Figure out how to share certain bits of information 
 
 @dataclass
 class AttrDict:
@@ -49,7 +56,7 @@ class AttrDict:
     # Did the player's location change from the last action
     player_moved: bool = True
     # The number of neurons per ensemble
-    ensemble_neurons: int = 400
+    ensemble_neurons: int = 1000
     # Learning rate of the learning rule
     learning_rate: float = 5e-5
     # The adaptive factor used with the Adaptive LIF neuron type
@@ -364,6 +371,16 @@ def create_model_fpga():
             size_out=2,
             label='Goal Point Distance'
         )
+        p_loc = nengo.Node(
+            output=player_location,
+            size_out=2,
+            label='Player Location'
+        )
+        g_loc = nengo.Node(
+            output=goal_location,
+            size_out=2,
+            label='Goal Location'
+        )
 
         # Movement output
         mov_out = nengo.Node(
@@ -412,20 +429,32 @@ def create_model_fpga():
                 label='Distance Input Connection',
             )
         else:
-            conn_g_dist_in = nengo.Connection(
-                pre=g_dist,
-                post=fpga.input[0],
-                label='Goal Distance Input'
+            # conn_g_dist_in = nengo.Connection(
+            #     pre=g_dist,
+            #     post=fpga.input[0],
+            #     label='Goal Distance Input'
+            # )
+            # conn_best_dir_in = nengo.Connection(
+            #     pre=best_dir,
+            #     post=fpga.input[1],
+            #     label='Best Direction Input'
+            # )
+            # conn_pnt_dist_in = nengo.Connection(
+            #     pre=g_pnt,
+            #     post=fpga.input[2:],
+            #     label='Goal Point Distance Input'
+            # )
+            conn_p_loc = nengo.Connection(
+                pre=p_loc,
+                post=fpga.input[:2],
+                transform=lambda x: x / 23,
+                label='Player Location Input'
             )
-            conn_best_dir_in = nengo.Connection(
-                pre=best_dir,
-                post=fpga.input[1],
-                label='Best Direction Input'
-            )
-            conn_pnt_dist_in = nengo.Connection(
-                pre=g_pnt,
+            conn_g_loc = nengo.Connection(
+                pre=g_loc,
                 post=fpga.input[2:],
-                label='Goal Point Distance Input'
+                transform=lambda x: x / 23,
+                label='Goal Location Input'
             )
 
 
@@ -607,6 +636,7 @@ def web_gui():
     dpg.destroy_context()
 
 if __name__ == '__main__':
+    start_time = multiprocessing.Value('d', time.time())
     logging.basicConfig(level=logging.INFO)
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
@@ -654,3 +684,6 @@ if '__page__' in locals():
     global model
     model: nengo.Network = None
     create_model_fpga()
+
+    def on_start(sim: nengo.Simulator):
+        start_time.value = time.time()
