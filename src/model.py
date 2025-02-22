@@ -3,6 +3,8 @@
 import math
 import json
 import logging
+import multiprocessing.shared_memory
+import struct
 import sys
 import nengo
 import nengo.learning_rules
@@ -26,6 +28,10 @@ from simulation import Arena, Direction, Point, Player, PathPair
 #   Scale Super/Sub reward state error differently (Super state = scale global error, Sub state = scale directional error)
 #   Consider increasing the error for the second best move in the path
 #   Consider making a web based display to allow running the model truely headless
+
+# Create two versions of each custom class
+#   - SharedValue class = stored the values of the class in shared memory with a given key
+#   - Proxy class = access to the shared values in the same way as the original
 
 # TODO:
 #   Create web ui interface
@@ -429,31 +435,16 @@ def create_model_fpga():
                 label='Distance Input Connection',
             )
         else:
-            # conn_g_dist_in = nengo.Connection(
-            #     pre=g_dist,
-            #     post=fpga.input[0],
-            #     label='Goal Distance Input'
-            # )
-            # conn_best_dir_in = nengo.Connection(
-            #     pre=best_dir,
-            #     post=fpga.input[1],
-            #     label='Best Direction Input'
-            # )
-            # conn_pnt_dist_in = nengo.Connection(
-            #     pre=g_pnt,
-            #     post=fpga.input[2:],
-            #     label='Goal Point Distance Input'
-            # )
             conn_p_loc = nengo.Connection(
                 pre=p_loc,
                 post=fpga.input[:2],
-                transform=lambda x: x / 23,
+                transform=np.ones(2, dtype=cvar.dtype) / 23.0,
                 label='Player Location Input'
             )
             conn_g_loc = nengo.Connection(
                 pre=g_loc,
                 post=fpga.input[2:],
-                transform=lambda x: x / 23,
+                transform=np.ones(2, dtype=cvar.dtype) / 23.0,
                 label='Goal Location Input'
             )
 
@@ -636,7 +627,8 @@ def web_gui():
     dpg.destroy_context()
 
 if __name__ == '__main__':
-    start_time = multiprocessing.Value('d', time.time())
+    start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=True, size=8)
+    start_time.buf[:8] = struct.pack('d', time.time())
     logging.basicConfig(level=logging.INFO)
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
@@ -647,6 +639,8 @@ if __name__ == '__main__':
             # Start the nengo web gui in the main thread
             g = nengo_gui.GUI(filename=__file__, editor=True)
             g.start()
+            start_time.close()
+            start_time.unlink()
             # Ensure the script exits after this runs
             exit(0)
         elif '--log' in sys.argv:
@@ -685,5 +679,7 @@ if '__page__' in locals():
     model: nengo.Network = None
     create_model_fpga()
 
-    def on_start(sim: nengo.Simulator):
-        start_time.value = time.time()
+    def on_start(sim: nengo.Simulator, cvar: AttrDict = cvar):
+        if cvar.in_gui:
+            start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=False)
+            start_time.buf[:8] = struct.pack('d', time.time())

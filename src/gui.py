@@ -2,6 +2,8 @@ import simulation as simulation
 import dearpygui.dearpygui as dpg
 import time
 import numpy as np
+import multiprocessing.shared_memory
+import struct
 
 def create_texture(n: int, m: int) -> list[float]:
     texture_data: list[float] = []
@@ -98,7 +100,9 @@ def display_gui():
 
 def update_text(score: int | None = None, start_time: float | None = None):
     if start_time is not None:
-        dpg.set_value('timer', start_time)
+        start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=False)
+        start_time_val = struct.unpack('d', start_time.buf[:8])
+        dpg.set_value('timer', start_time_val)
     start_time = dpg.get_value('timer')
     if score is not None:
         dpg.set_value('score', f'Score: {score}')
