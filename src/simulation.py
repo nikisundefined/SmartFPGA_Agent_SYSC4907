@@ -245,13 +245,16 @@ class PathCache:
         self.cache: dict[PathPair, list[Point] | None] = {}
     
     def __getitem__(self, pair: PathPair) -> list[Point] | None:
-        return self.cache.get(key=pair, default=None)
+        return self.cache.get(pair, None)
 
     def __setitem__(self, pair: PathPair, path: list[Point] | None) -> None:
-        self.cache.setdefault(key=pair, default=path)
+        self.cache.setdefault(pair, path)
 
     def __contains__(self, elem: PathPair) -> bool:
         return elem in self.cache.keys()
+    
+    def __len__(self) -> int:
+        return len(self.cache)
 
 # The arena containing the player
 class Arena:

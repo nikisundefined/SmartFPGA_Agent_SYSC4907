@@ -27,8 +27,6 @@ def create_property(name: str, attr_type: type) -> property:
         return getattr(self, f"_{name}")
 
     def setter(self, value) -> None:
-        if not isinstance(value, attr_type):
-            raise TypeError(f"{name} must be of type {attr_type}")
         setattr(self, f"_{name}", value)
     
     def deleter(self) -> None:
@@ -79,7 +77,7 @@ class DefaultConsoleDict:
     # Flag if the current action moved away from the goal
     moved_away_from_goal: int = 0
     # The synapse used for the connection between pre and post ensembles
-    connection_synapse = 0.01
+    connection_synapse: float = 0.01
     # The logging level for the script to print out
     log_level: int = int(logging.DEBUG)
     # Path to the A* path cache file
@@ -131,8 +129,8 @@ class GUIDict:
 for attr, type in DefaultGUIDict.__annotations__.items():
         setattr(GUIDict, attr, create_property(attr, type))
 
-cvar: ConsoleDict
-gvar: GUIDict
+cvar: ConsoleDict = ConsoleDict()
+gvar: GUIDict = GUIDict()
 
 if __name__ == '__main__':
     ### Global initialization

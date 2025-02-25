@@ -64,11 +64,6 @@ log = logging.getLogger(__file__)
 if cvar.path_cache_file.exists():
     import json
     # Load path cache
-    try:
-        tmp = multiprocessing.shared_memory.SharedMemory('path_cache', create=False)
-    except:
-        log.debug('Could not load path cache from shared memory')
-
     log.info(f'Found path cache file at: {cvar.path_cache_file.absolute()}')
     jstr: str = Path.read_text(cvar.path_cache_file)
     for pair, path in json.loads(jstr).items():
@@ -78,9 +73,6 @@ if cvar.path_cache_file.exists():
             path = [Point(**kwargs) for kwargs in path]
         cvar.arena.path[pair] = path
     log.info(f"Loaded {len(cvar.arena.path)} paths from cache")
-    jbytes: bytes = jstr.encode('utf-8')
-    tmp = multiprocessing.shared_memory.SharedMemory('path_cache', create=True, size=len())
-    tmp.buf = jbytes
 
 ### Input Node Functions ###
 
@@ -140,7 +132,7 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         cvar.player_moved = False
         return
 
-    # Ensure the index is in range of the enum to prevent errors (TODO: unneeded?)
+    # Ensure the index is in range of the enum to prevent errors
     if index < 0 or index > 3:
         raise IndexError(f'simulation.Direction: Index {index} out of range')
     tmp: Point = Point(cvar.arena.player.x, cvar.arena.player.y) # Store the old location
@@ -631,4 +623,4 @@ if '__page__' in locals():
         if cvar.in_gui:
             start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=False)
             start_time.buf[:8] = struct.pack('d', time.time())
-            gui.update_text(start_time=True)
+            # gui.update_text(start_time=True)
