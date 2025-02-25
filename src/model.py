@@ -19,9 +19,10 @@ import multiprocessing
 import dearpygui.dearpygui as dpg
 import pause
 import threading
+import vars
 from pathlib import Path
-from dataclasses import dataclass
-from simulation import Arena, Direction, Point, Player, PathPair
+from simulation import Direction, Point, Player, PathPair
+from vars import ConsoleDict as AttrDict
 
 # NOTE: 
 #   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
@@ -55,75 +56,19 @@ from simulation import Arena, Direction, Point, Player, PathPair
 #   Local GUI Cannot share data with the nengo gui due, since the script is compiled with all variables stripped
 #       - Figure out how to share certain bits of information 
 
-@dataclass
-class AttrDict:
-    # The last action performed by the agent in the simulation
-    last_action: Direction = None
-    # Did the player's location change from the last action
-    player_moved: bool = True
-    # The number of neurons per ensemble
-    ensemble_neurons: int = 1000
-    # Learning rate of the learning rule
-    learning_rate: float = 5e-5
-    # The adaptive factor used with the Adaptive LIF neuron type
-    tau_n: float = 0.01
-    # Neuron type used in all ensembles
-    neuron_type: nengo.neurons.NeuronType = nengo.neurons.SpikingRectifiedLinear()
-    # Solver type used for learning connections
-    solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True)
-    # Learning rule used for learning connections
-    learning_rule_type: nengo.learning_rules.LearningRuleType = nengo.learning_rules.PES(learning_rate=learning_rate, pre_synapse=None)
-    # Number of dimensions input to the model
-    input_dimensions: int = 4
-    # Number of dimensions output from the model
-    output_dimensions: int = 4
-    # Number of dimensions ouput from the error function
-    error_dimensions: int = 4
-    # The datatype used for all numpy arrays
-    dtype: np.dtype = np.float16
-    # The current reward of the agent
-    reward: float = 1.0
-    # The minimum value for an action to be selected
-    movement_threshold: float = 1e-6
-    # The arena the agent with move within
-    arena: Arena = Arena()
-    # Was an action performed by the agent since the last action
-    action_performed: bool = False
-    # In the simulation running in the nengo gui
-    in_gui: bool = False
-    # Flag if the current action moved away from the goal
-    moved_away_from_goal: int = 0
-    # The synapse used for the connection between pre and post ensembles
-    connection_synapse = 0.01
-    # The logging level for the script to print out
-    log_level: str | int = int(logging.DEBUG)
-    # Path to the A* path cache file
-    path_cache_file: Path = Path(__file__).parent.parent / 'path_cache.json'
-    # Selector for the alternate set of inputs to the model (Only useful with the fpga model)
-    alt_input: bool = True
-    # Should the reward reset after collecting a goal
-    reward_reset: bool = False
-    
-    def export(self) -> str:
-        class JsonEncoder(json.JSONEncoder):
-            def __init__():
-                super()
-            
-            def default(self, o):
-                if o is Arena or o is Player or o is Point:
-                    return o.__json__()
-                elif o is Direction:
-                    return int(o)
-                return super().default(o)
-        return json.dumps(self.__dict__, cls=JsonEncoder, skipkeys=True)
 
 # Setup the variables for the model
-cvar: AttrDict = AttrDict()
-log = logging.getLogger('simulation')
+cvar = vars.cvar
+log = logging.getLogger(__file__)
 
 if cvar.path_cache_file.exists():
     import json
     # Load path cache
+    try:
+        tmp = multiprocessing.shared_memory.SharedMemory('path_cache', create=False)
+    except:
+        log.debug('Could not load path cache from shared memory')
+
     log.info(f'Found path cache file at: {cvar.path_cache_file.absolute()}')
     jstr: str = Path.read_text(cvar.path_cache_file)
     for pair, path in json.loads(jstr).items():
@@ -133,6 +78,9 @@ if cvar.path_cache_file.exists():
             path = [Point(**kwargs) for kwargs in path]
         cvar.arena.path[pair] = path
     log.info(f"Loaded {len(cvar.arena.path)} paths from cache")
+    jbytes: bytes = jstr.encode('utf-8')
+    tmp = multiprocessing.shared_memory.SharedMemory('path_cache', create=True, size=len())
+    tmp.buf = jbytes
 
 ### Input Node Functions ###
 
@@ -683,3 +631,4 @@ if '__page__' in locals():
         if cvar.in_gui:
             start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=False)
             start_time.buf[:8] = struct.pack('d', time.time())
+            gui.update_text(start_time=True)

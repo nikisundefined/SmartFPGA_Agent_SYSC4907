@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
-import multiprocessing.synchronize
 import numpy as np
 import math
 import astar
 import logging
+import threading
+import pathlib
+import json
 from typing import Union
 from enum import IntEnum
 
@@ -43,6 +45,9 @@ class Point:
     def copy(self) -> 'Point':
         return Point(self.x, self.y)
 
+    def clone(self) -> 'Point':
+        return self.copy()
+
     def __init__(self, x: int, y: int):
         self.x: int = x
         self.y: int = y
@@ -75,7 +80,7 @@ class Point:
     def __repr__(self) -> str:
         return f"({self.x},{self.y})"
 
-    def __json__(self) -> dict[str]:
+    def __json__(self) -> dict[str, int]:
         return {
             'x': int(self.x),
             'y': int(self.y)
@@ -208,6 +213,46 @@ class PathPair:
     def __hash__(self) -> int:
         return hash(str(self))
 
+class PathCache:
+    @classmethod
+    def fromjson(cls, jstr: str) -> 'PathCache':
+        tmp = cls()
+        j: dict[str, list[dict[str, int]] | None] = json.loads(jstr)
+        for pair, path in j.items():
+            pair = PathPair.fromstr(pair)
+            if path is not None:
+                path = [{k: int(v) for k, v in p.items()} for p in path]
+                path = [Point(**kwargs) for kwargs in path]
+            tmp.cache.setdefault(pair, path)
+        return tmp
+
+    @classmethod
+    def fromfile(cls, f: str) -> 'PathCache':
+        p: pathlib.Path = pathlib.Path(f)
+        if not p.exists():
+            raise FileNotFoundError(f'Could not file {f}')
+        txt: str = p.read_text()
+        return cls.fromjson(txt)
+
+    def count(self) -> int:
+        count: int = 0
+        for _, v in self.cache.items():
+            if v is not None:
+                count += len(v)
+        return count
+
+    def __init__(self):
+        self.cache: dict[PathPair, list[Point] | None] = {}
+    
+    def __getitem__(self, pair: PathPair) -> list[Point] | None:
+        return self.cache.get(key=pair, default=None)
+
+    def __setitem__(self, pair: PathPair, path: list[Point] | None) -> None:
+        self.cache.setdefault(key=pair, default=path)
+
+    def __contains__(self, elem: PathPair) -> bool:
+        return elem in self.cache.keys()
+
 # The arena containing the player
 class Arena:
     EMPTY = 0
@@ -217,6 +262,8 @@ class Arena:
 
     _player_start: Point = Point(3,3) # Initial starting point for the player
     _goal_start: Point = Point(11, 9) # Initial starting point for the goal
+    path_cache: PathCache = PathCache()
+    path_cache_lock: threading.RLock = threading.RLock()
     
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n
@@ -224,7 +271,7 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
-        self.path: dict[PathPair, list[Point]] = {}
+        self.path: PathCache = Arena.path_cache
         assert self.grid[self.goal.y][self.goal.x] != Arena.WALL
     
     def __json__(self) -> dict[str]:
@@ -252,7 +299,7 @@ class Arena:
             [cls.WALL] * 5 + [cls.EMPTY, cls.WALL, cls.EMPTY] + [cls.WALL] * 3,
             [cls.WALL] + [cls.EMPTY] * 5 + [cls.WALL] + [cls.EMPTY] * 4,
             [cls.WALL, cls.EMPTY, cls.WALL, cls.WALL, cls.WALL, cls.WALL, cls.WALL, cls.EMPTY, cls.WALL, cls.WALL, cls.WALL]
-        ], np.float64)
+        ], np.uint8)
         assert grid_quad.shape == (11, 11), f"Invalid grid shape: {grid_quad.shape}"
         grid_horizontal_spacer = np.array([[cls.EMPTY] * 8 + [cls.WALL] + [cls.EMPTY] * 5 + [cls.WALL] + [cls.EMPTY] * 8], np.float64) # The line between the bottom and top halves
         grid_vertical_spacer = np.array([[cls.WALL, cls.EMPTY, cls.EMPTY, cls.EMPTY, cls.WALL, cls.EMPTY, cls.WALL, cls.EMPTY, cls.WALL, cls.EMPTY, cls.EMPTY]], np.float64).transpose() # The line between the left and right halves
@@ -386,19 +433,7 @@ class Arena:
     def absolute_distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
     
-    # The distance between two points in the grid using the A* algorithm
-    def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
-        global log
-        # Set defaults for the start and end positions
-        if start is None:
-            start = self.player.point
-        if end is None:
-            end = self.goal
-
-        pathKey: PathPair = PathPair(start, end)
-        assert start is not None and end is not None and pathKey is not None
-        if pathKey in self.path.keys():
-            return self.path[pathKey]
+    def _distance(self, pathKey: PathPair) -> list[Point] | None:
         log.warning(f'  simulation.Arena: Distance cache miss {pathKey}')
 
         # Define function to calculate neighbors of points
@@ -428,8 +463,26 @@ class Arena:
         # Convert iterator to list of points
         if tmp is not None:
             tmp = [p for p in tmp]
+        return tmp
+
+    # The distance between two points in the grid using the A* algorithm
+    def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
+        global log
+        # Set defaults for the start and end positions
+        if start is None:
+            start = self.player.point
+        if end is None:
+            end = self.goal
+
+        pathKey: PathPair = PathPair(start, end)
+        assert start is not None and end is not None and pathKey is not None
+        with Arena.path_cache_lock:
+            if pathKey in self.path:
+                return self.path[pathKey]
+        tmp = self._distance(pathKey)
         # Update the path cache
-        self.path[pathKey] = tmp
+        with Arena.path_cache_lock:
+            self.path[pathKey] = tmp
         log.debug(f'  Computed path from {start} to {end} as: {tmp}')
         return tmp
     
