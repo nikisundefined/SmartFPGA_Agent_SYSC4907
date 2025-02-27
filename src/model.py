@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 
-import math
-import json
-import logging
-import multiprocessing.shared_memory
-import struct
+
 import sys
+import math
+import time
+import logging
+import threading
+import multiprocessing.shared_memory
+log = logging.getLogger('model')
+handle = logging.StreamHandler(sys.stdout)
+handle.setFormatter(logging.Formatter(f'{threading.current_thread().name}[{{name}}] | {{levelname}} -> {{message}}', style='{'))
+log.addHandler(handle)
+
+
 import nengo
 import nengo.learning_rules
 import nengo.neurons
@@ -13,30 +20,35 @@ import nengo.solvers
 import nengo_gui
 import nengo_fpga.networks
 import numpy as np
-import gui
-import time
-import multiprocessing
 import dearpygui.dearpygui as dpg
 import pause
-import threading
+
 import vars
-from pathlib import Path
-from simulation import Direction, Point, Player, PathPair
-from vars import ConsoleDict as AttrDict
+import shared
+import simulation
+import gui
+
+AttrDict = vars.ConsoleDict
+Direction = simulation.Direction
+Point = simulation.Point
+Player = simulation.Player
+Arena = simulation.Arena
+PathCache = simulation.PathCache
 
 # NOTE: 
 #   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
-#   Scale Super/Sub reward state error differently (Super state = scale global error, Sub state = scale directional error)
+#       Scale Super/Sub reward state error differently (Super state = scale global error, Sub state = scale directional error)
 #   Consider increasing the error for the second best move in the path
-#   Consider making a web based display to allow running the model truely headless
 
-# Create two versions of each custom class
-#   - SharedValue class = stored the values of the class in shared memory with a given key
-#   - Proxy class = access to the shared values in the same way as the original
+# NOTE:
+#   Conversion of nengo neuron model to C++ HLS equivalent
+#       - Convert python implementation to C++
+#       - Create python proxy class to wrap C++ implementation using something like pybind11
+#       - Replace implementation of neuron model in library with custom model
 
 # TODO:
-#   Create web ui interface
-#   Convert cvars into shared memory
+#   Investigate why the move function results in a large pause when actually executed
+#   Add Comments to all new code
 #   Find better inputs
 #       - Player Position
 #       - Goal Position
@@ -53,26 +65,45 @@ from vars import ConsoleDict as AttrDict
 #       - Error Baseline
 #       - Reward Factors
 #       - Neuron Count
-#   Local GUI Cannot share data with the nengo gui due, since the script is compiled with all variables stripped
-#       - Figure out how to share certain bits of information 
 
 
 # Setup the variables for the model
 cvar = vars.cvar
-log = logging.getLogger(__file__)
+log.setLevel(cvar.log_level)
 
-if cvar.path_cache_file.exists():
-    import json
-    # Load path cache
+if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exists():
+    # Path cache is not loaded, and the file to load it exists
+    attached: bool = False
+    try:
+        # Check if the cache is stored in shared memory
+        tmp = shared.create_shared_memory(0, 'path_cache', shared.AttachFlag.ATTACH)
+        log.info('Found path cache in shared memory')
+        # Ensure it is the correct size
+        if tmp.nbytes < shared.SharedPathCache.size:
+            log.warning(f'Shared memory region for path cache is incorrect size: {tmp.nbytes}')
+            tmp.release()
+            # Not the right size, remove it and reallocate
+            elem: multiprocessing.shared_memory.SharedMemory = None
+            for name in shared.shm_names:
+                if name.name == 'path_cache':
+                    name.close()
+                    name.unlink()
+                    elem = name
+                    break
+            shared.shm_names.remove(elem)
+            raise BufferError()
+        attached = True
+    except:
+        log.info('Could not find shared memory region for path cache, loading from file')
+        # Could not load from shared memory, load from file instead
+        Arena.path_cache = PathCache.fromfile(cvar.path_cache_file.absolute())
+        nbytes: int = Arena.path_cache.count() * shared.SharedPoint.size
+        tmp = shared.create_shared_memory(nbytes, 'path_cache')
+    
+    shared.SharedArena.shared_path_cache = shared.SharedPathCache(tmp)
     log.info(f'Found path cache file at: {cvar.path_cache_file.absolute()}')
-    jstr: str = Path.read_text(cvar.path_cache_file)
-    for pair, path in json.loads(jstr).items():
-        pair = PathPair.fromstr(pair)
-        if path is not None:
-            path = [{k: int(v) for k, v in p.items()} for p in path]
-            path = [Point(**kwargs) for kwargs in path]
-        cvar.arena.path[pair] = path
-    log.info(f"Loaded {len(cvar.arena.path)} paths from cache")
+    shared.SharedArena.shared_path_cache.load(Arena.path_cache)
+    log.info(f"Loaded {len(shared.SharedArena.shared_path_cache)} paths from cache")
 
 ### Input Node Functions ###
 
@@ -138,7 +169,7 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     tmp: Point = Point(cvar.arena.player.x, cvar.arena.player.y) # Store the old location
     cvar.arena.move(index) # Move the player in the arena
     delta_dist: Point = tmp - cvar.arena.player.point
-    cvar.last_action = None if tmp == cvar.arena.player else (Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == 22 else delta_dist.asdirection()) # Store the direction moved or 
+    cvar.last_action = Direction.NONE if tmp == cvar.arena.player else (Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == cvar.arena.n - 1 else delta_dist.asdirection()) # Store the direction moved or 
 
     # Check if the player has stopped moving and log it
     if cvar.player_moved and tmp == cvar.arena.player:
@@ -567,8 +598,6 @@ def web_gui():
     dpg.destroy_context()
 
 if __name__ == '__main__':
-    start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=True, size=8)
-    start_time.buf[:8] = struct.pack('d', time.time())
     logging.basicConfig(level=logging.INFO)
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
@@ -579,8 +608,10 @@ if __name__ == '__main__':
             # Start the nengo web gui in the main thread
             g = nengo_gui.GUI(filename=__file__, editor=True)
             g.start()
-            start_time.close()
-            start_time.unlink()
+            # Ensure all references to shared memory are removed before exiting
+            del vars.cvar
+            del vars.gvar
+            del shared.SharedArena.shared_path_cache
             # Ensure the script exits after this runs
             exit(0)
         elif '--log' in sys.argv:
@@ -608,19 +639,9 @@ if '__page__' in locals():
             log.info('Found gui')
             cvar.in_gui = True
             break
-    
-    # Setup logging
-    log = nengo.logger
-    log.setLevel(cvar.log_level)
-    print('Setting up for NengoGUI')
-    logging.basicConfig(stream=sys.stdout, level=cvar.log_level)
+    nengo.logger.setLevel(logging.WARNING)
+    log.info('Setting up for NengoGUI')
     # Create the model
     global model
     model: nengo.Network = None
     create_model_fpga()
-
-    def on_start(sim: nengo.Simulator, cvar: AttrDict = cvar):
-        if cvar.in_gui:
-            start_time = multiprocessing.shared_memory.SharedMemory('start_time', create=False)
-            start_time.buf[:8] = struct.pack('d', time.time())
-            # gui.update_text(start_time=True)

@@ -4,10 +4,13 @@ import nengo.learning_rules
 import logging
 import json
 import numpy as np
-from multiprocessing.shared_memory import SharedMemory
-from pathlib import Path
-from simulation import Direction, Arena, Player, Point
+import pathlib
+import simulation
+# from simulation import Arena, Direction
 from dataclasses import dataclass, asdict
+
+Arena = simulation.Arena
+Direction = simulation.Direction
 
 # Default json encoder for custom object serialization
 class JsonEncoder(json.JSONEncoder):
@@ -43,11 +46,11 @@ def create_property(name: str, attr_type: type) -> property:
 @dataclass(frozen=True)
 class DefaultConsoleDict:
     # The last action performed by the agent in the simulation
-    last_action: Direction = Direction.UP
+    last_action: Direction = Direction.NONE
     # Did the player's location change from the last action
     player_moved: bool = True
     # The number of neurons per ensemble
-    ensemble_neurons: int = 1000
+    ensemble_neurons: int = 400
     # Learning rate of the learning rule
     learning_rate: float = 5e-5
     # The adaptive factor used with the Adaptive LIF neuron type
@@ -81,7 +84,7 @@ class DefaultConsoleDict:
     # The logging level for the script to print out
     log_level: int = int(logging.DEBUG)
     # Path to the A* path cache file
-    path_cache_file: Path = Path(__file__).parent.parent / 'path_cache.json'
+    path_cache_file: pathlib.Path = pathlib.Path(__file__).parent.parent / 'path_cache.json'
     # Selector for the alternate set of inputs to the model (Only useful with the fpga model)
     alt_input: bool = True
     # Should the reward reset after collecting a goal
@@ -129,40 +132,39 @@ class GUIDict:
 for attr, type in DefaultGUIDict.__annotations__.items():
         setattr(GUIDict, attr, create_property(attr, type))
 
-cvar: ConsoleDict = ConsoleDict()
-gvar: GUIDict = GUIDict()
+log: logging.Logger = logging.getLogger('model.vars')
 
-if __name__ == '__main__':
+if __name__ != '__main__':
     ### Global initialization
     import shared
-    _log: logging.Logger = logging.getLogger(__file__)
+    _log: logging.Logger = logging.getLogger('vars')
 
     if 'svar' not in globals():
-        global svar
         svar: SharedDict = SharedDict()
         _log.debug('Initialized shared variables')
 
     # If console vars are not loaded, attempt to load them from shared memory
-    if 'cvar' not in globals():
+    if svar.cvars_name not in globals():
         _log.debug('cvar not found, attempting to load from shared memory')
-        # global cvar
+        tmp: memoryview = None
         try:
-            tmp = SharedMemory(name=svar.cvars_name, create=False)
+            tmp = shared.create_shared_memory(shared.SharedConsoleDict.size, svar.cvars_name, shared.AttachFlag.ATTACH)
             _log.debug(f'Loaded Console Variables from shared memory with name: {svar.cvars_name}')
-        except:
+        except Exception as e:
             _log.warning('Could not load Console Variables from shared memory, creating new instance')
-            tmp = SharedMemory(name=svar.cvars_name, create=True, size=shared.SharedConsoleDict.size)
-        cvar: ConsoleDict = shared.SharedConsoleDict(tmp.buf)
+            tmp = shared.create_shared_memory(shared.SharedConsoleDict.size, svar.cvars_name)
+        cvar: ConsoleDict = shared.SharedConsoleDict(tmp)
+        log.setLevel(cvar.log_level)
         
     # If GUI vars are not loaded, attempt to load them from shared memory
-    if 'gvar' not in globals():
+    if svar.gvars_name not in globals():
         _log.debug('gvar not found, attempting to load from shared memory')
-        # global gvar
+        tmp: memoryview = None
         try:
-            tmp = SharedMemory(name=svar.gvars_name, create=False)
+            tmp = shared.create_shared_memory(shared.SharedGUIDict.size, svar.gvars_name, shared.AttachFlag.ATTACH)
             _log.debug(f'Loaded GUI Variables from shared memory with name: {svar.gvars_name}')
         except:
             _log.warning('Could not load GUI Variables from shared memory, creating new instance')
-            tmp = SharedMemory(name=svar.gvars_name, create=True, size=shared.SharedGUIDict.size)
-        gvar: GUIDict = shared.SharedGUIDict(tmp.buf)
+            tmp = shared.create_shared_memory(shared.SharedGUIDict.size, svar.gvars_name)
+        gvar: GUIDict = shared.SharedGUIDict(tmp)
         gvar.arena = cvar.arena

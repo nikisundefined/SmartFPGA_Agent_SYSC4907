@@ -10,8 +10,7 @@ import json
 from typing import Union
 from enum import IntEnum
 
-log: logging.Logger = logging.getLogger('simulation')
-log.setLevel(logging.DEBUG)
+log: logging.Logger = logging.getLogger('model.simulation')
 
 class Point:
 
@@ -88,10 +87,11 @@ class Point:
         
 # An enumeration representing a direction on the grid
 class Direction(IntEnum):
-    UP = 0
-    RIGHT = 1
-    DOWN = 2
-    LEFT = 3
+    NONE: int = -1
+    UP: int = 0
+    RIGHT: int = 1
+    DOWN: int = 2
+    LEFT: int = 3
 
     # Convert this direction into a 4D numpy vector
     def tovector(self) -> np.ndarray:
@@ -198,8 +198,8 @@ class PathPair:
         return cls(Point(p[0], p[1]), Point(p[2], p[3]))
 
     def __init__(self, start: Point, end: Point):
-        self.start: Point = start.copy()
-        self.end: Point = end.copy()
+        self.start: Point = Point.copy(start)
+        self.end: Point = Point.copy(end)
 
     def __eq__(self, other: 'PathPair') -> bool:
         return self.start == other.start and self.end == other.end
@@ -274,7 +274,7 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
-        self.path: PathCache = Arena.path_cache
+        # self.paths: PathCache = Arena.path_cache
         assert self.grid[self.goal.y][self.goal.x] != Arena.WALL
     
     def __json__(self) -> dict[str]:
@@ -322,10 +322,11 @@ class Arena:
             return self._tile_pos(args[0], args[1])
         elif 'x' in kwargs and 'y' in kwargs:
             return self._tile_pos(kwargs['x'], kwargs['y'])
-        elif type(args[0]) == Point or type(args[0]) == Player:
+        elif isinstance(args[0], Point) or isinstance(args[0], Player):
             return self._tile_pnt(args[0], kwargs.get('offset_x', 0), kwargs.get('offset_y', 0))
         elif 'p' in kwargs:
             return self._tile_pnt(kwargs['p'], kwargs.get('offset_x', 0), kwargs.get('offset_y', 0))
+        raise ValueError(f"Invalid arguments: {args}, {kwargs}")
 
     # Get the tile at the point or players location offset by the given amount
     def _tile_pnt(self, p: Point | Player, offset_x: int = 0, offset_y: int = 0) -> int:
@@ -409,26 +410,34 @@ class Arena:
         # Scan out from the player in a direction until you hit a wall
 
         dist_up: int = 0
-        while self._tile(self.player, offset_y=-dist_up) != self.WALL:
+        while self._tile(self.player, offset_y=-dist_up) != int(Arena.WALL):
             dist_up += 1
+            if dist_up > self.m:
+                raise RuntimeError(f"Detection in upward axis escaped bounds: {self.player} -> {self.grid}")
         
         dist_down: int = 0
-        while self._tile(self.player, offset_y=dist_down) != self.WALL:
+        while self._tile(self.player, offset_y=dist_down) != int(Arena.WALL):
             dist_down += 1
+            if dist_down > self.m:
+                raise RuntimeError(f"Detection in downward axis escaped bounds: {self.player}")
 
-        tmp_pnt: Point = self.player.point.copy()
+        tmp_pnt: Point = Point.copy(self.player.point)
         dist_left: int = 0
-        while self._tile(tmp_pnt, offset_x=-dist_left) != self.WALL:
+        while self._tile(tmp_pnt, offset_x=-dist_left) != int(Arena.WALL):
             dist_left += 1
             if tmp_pnt.x - dist_left < 0:
                 tmp_pnt.x = 23
+            if dist_left > self.n:
+                raise RuntimeError(f"Detection in leftward axis escaped bounds: {self.player}")
         
-        tmp_pnt: Point = self.player.point.copy()
+        tmp_pnt: Point = Point.copy(self.player.point)
         dist_right: int = 0
-        while self._tile(tmp_pnt, offset_x=dist_right) != self.WALL:
+        while self._tile(tmp_pnt, offset_x=dist_right) != int(Arena.WALL):
             dist_right += 1
             if tmp_pnt.x + dist_right >= self.n:
                 tmp_pnt.x = 0
+            if dist_right > self.n:
+                raise RuntimeError(f"Detection in rightward axis escaped bounds: {self.player}")
     
         return np.array([dist_up, dist_right, dist_down, dist_left], np.float64) - np.ones(4)
     
@@ -436,7 +445,7 @@ class Arena:
     def absolute_distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
     
-    def _distance(self, pathKey: PathPair) -> list[Point] | None:
+    def _distance(self, pathKey: PathPair, start: Point, end: Point) -> list[Point] | None:
         log.warning(f'  simulation.Arena: Distance cache miss {pathKey}')
 
         # Define function to calculate neighbors of points
@@ -570,6 +579,8 @@ def main():
             print("Player has reached the goal")
             arena.set_goal()
             print(f"Goal is now located at: ({arena.goal.x}, {arena.goal.y})")
+
+
 
 if __name__ == "__main__":
     import sys

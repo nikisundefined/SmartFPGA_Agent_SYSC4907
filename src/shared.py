@@ -4,11 +4,18 @@ import multiprocessing.shared_memory as shm
 import numpy as np
 import atexit
 import ctypes
-import vars
 import logging
-from io import StringIO
+import inspect
+import simulation
 from enum import IntEnum
-from simulation import Arena, Player, Point, Direction, PathCache, PathPair
+# from simulation import Arena, Player, Point, Direction, PathCache, PathPair
+
+Arena = simulation.Arena
+Player = simulation.Player
+Point = simulation.Point
+Direction = simulation.Direction
+PathCache = simulation.PathCache
+PathPair = simulation.PathPair
 
 """Shared Implementaion and Proxy classes for the variable storage classes defined in vars.py and simulation.py"""
 
@@ -24,18 +31,23 @@ from simulation import Arena, Player, Point, Direction, PathCache, PathPair
 #   bool -> uint8
 #   str -> uint8[255]
 
-log: logging.Logger = logging.getLogger(__file__)
+import vars
+log: logging.Logger = logging.getLogger('model.shared')
 
 # Setup the collection of all shared memory segments to cleanup on exit
 if 'shm_names' not in globals():
     global shm_names
-    shm_names: list[shm.SharedMemory] = []
+    shm_names: dict[str, tuple[shm.SharedMemory, bool, str]] = {}
 
     def cleanup():
         global shm_names
-        for name in shm_names:
-            name.close()
-            name.unlink()
+        for name, pair in shm_names.items():
+            if pair[1]:
+                try:
+                    pair[0].close()
+                    pair[0].unlink()
+                except Exception as e:
+                    log.warning(f'Failed to cleanup shared memory region {pair[0].name}\n{e}\nBacktrace:\n{pair[2]}')
     try:
         atexit.unregister(cleanup)
     except:
@@ -55,8 +67,18 @@ def create_shared_memory(size: int, name: str = None, attach: AttachFlag = Attac
     if attach > int(AttachFlag.DONT_ATTACH):
         assert name is not None, "Name cannot be None when trying to attach to shared memory region"
     ret = shm.SharedMemory(name=name, create=(attach == AttachFlag.DONT_ATTACH), size=size)
-    if attach != int(AttachFlag.ATTACH):
-        shm_names.append(ret)
+    tmp = ""
+    count: int = 0
+    for frame in inspect.stack():
+        tmp += f"{count}: {frame.filename}.{frame.function}:{frame.lineno}\n"
+        count += 1
+    if attach == int(AttachFlag.DONT_ATTACH):
+        if name is None:
+            log.debug(f'Allocated {size} bytes with name {ret.name} for:\n{tmp}')
+        else:
+            tmpl = inspect.stack()[1]
+            log.debug(f'Allocated {size} bytes with name {ret.name} for {tmpl.filename}.{tmpl.function}')
+    shm_names.setdefault(ret.name, (ret, attach != AttachFlag.ATTACH, tmp))
     return ret.buf
 
 # Creates a property that stores the value in shared memory given by the memoryview object
@@ -64,13 +86,13 @@ def create_shared_property(name: str, attr_type: type) -> property:
     # if not issubclass(attr_type, ctypes._SimpleCData):
     #     raise TypeError(f"Shared properties can only be represented as C-Types: {attr_type}")
     def getter(self):
-        return getattr(self, f'_{name}').value
+        return attr_type(getattr(self, f'_{name}').value)
     def setter(self, value):
         if not isinstance(value, attr_type):
             raise TypeError(f'')
-        getattr(self, name).value = value
+        getattr(self, f'_{name}').value = value
     def deleter(self):
-        delattr(self, name)
+        delattr(self, f'_{name}')
     return property(getter, setter, deleter)
 
 # A point that is stored in shared memory
@@ -127,7 +149,9 @@ class SharedPoint(Point):
     def clone(self) -> 'SharedPoint':
         return SharedPoint(self.buf)
 
-    def __init__(self, buf: memoryview):
+    def __init__(self, buf):
+        if isinstance(buf, SharedPoint):
+            buf = buf.buf
         assert buf.nbytes >= 8, "Not enough space in the given buffer"
         self.buf: memoryview = buf
         self._x = ctypes.c_uint32.from_buffer(buf[:4])
@@ -139,12 +163,14 @@ class SharedPoint(Point):
             other = other.topoint()
         self.x += other.x
         self.y += other.y
+        return self
 
     def __isub__(self, other: Point | Player | Direction) -> None:
         if type(other) is Direction:
             other = other.topoint()
         self.x -= other.x
         self.y -= other.y
+        return self
 
     # Assigns the value of another point to this point object
     def assign(self, other: Point) -> None:
@@ -246,7 +272,9 @@ class SharedPlayer(Player):
         tmp.point.assign(p)
         return tmp
     
-    def __init__(self, buf: memoryview):
+    def __init__(self, buf):
+        if isinstance(buf, SharedPlayer):
+            buf = buf._buf
         self._buf: memoryview = buf
         self._score: ctypes.c_uint32 = ctypes.c_uint32.from_buffer(buf[:4])
         self.point: SharedPoint = SharedPoint(buf[4:])
@@ -262,7 +290,7 @@ class SharedPlayer(Player):
         return tmp
     
     def move(self, dir: Direction) -> None:
-        self.point += dir
+        self.point += Direction(dir)
     
     @property
     def score(self) -> int:
@@ -299,7 +327,7 @@ class SharedArena(Arena):
         self.grid: np.ndarray = np.ndarray(grid.shape, dtype=grid.dtype, buffer=self.buf[offset:offset+grid.nbytes])
         self.grid[:] = grid[:]
         offset += self.grid.nbytes
-        self.paths: SharedPathCache = None
+        # self.paths: SharedPathCache = SharedArena.shared_path_cache
     
     def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
         global log
@@ -311,14 +339,42 @@ class SharedArena(Arena):
 
         pathKey: PathPair = PathPair(start, end)
         assert start is not None and end is not None and pathKey is not None
-        if pathKey in self.paths:
-            return self.path[pathKey]
-        tmp = self._distance(pathKey)
+        if pathKey in SharedArena.shared_path_cache:
+            return SharedArena.shared_path_cache[pathKey]
+        with Arena.path_cache_lock:
+            if pathKey in Arena.path_cache:
+                return Arena.path_cache[pathKey]
+        tmp = self._distance(pathKey, start, end)
         # Update the path cache
-        self.path[pathKey] = tmp
+        Arena.path_cache[pathKey] = tmp
         log.debug(f'  Computed path from {start} to {end} as: {tmp}')
         return tmp
 
+def copy_default_params_to_shared(self, base_class: type):
+    offset: int = 0
+    for k, v in vars.asdict(base_class()).items():
+        internal_name: str = f'_{k}'
+        attr_type: type = type(getattr(self, internal_name))
+        if issubclass(attr_type, bool):
+            setattr(self, internal_name, ctypes.c_uint8.from_buffer(self.buf[offset:offset+ctypes.sizeof(ctypes.c_uint8)]))
+            offset += ctypes.sizeof(ctypes.c_uint8)
+            getattr(self, internal_name).value = bool(v)
+        elif issubclass(attr_type, int):
+            setattr(self, internal_name, ctypes.c_int32.from_buffer(self.buf[offset:offset+ctypes.sizeof(ctypes.c_int32)]))
+            offset += ctypes.sizeof(ctypes.c_int32)
+            getattr(self, internal_name).value = int(v)
+        elif issubclass(attr_type, float):
+            setattr(self, internal_name, ctypes.c_double.from_buffer(self.buf[offset:offset+ctypes.sizeof(ctypes.c_double)]))
+            offset += ctypes.sizeof(ctypes.c_double)
+            getattr(self, internal_name).value = float(v)
+        elif issubclass(attr_type, str):
+            val: bytes = str(v).encode()
+            setattr(self, internal_name, self.buf[offset:offset+255])
+            offset += 255
+            getattr(self, internal_name)[:] = val[:]
+        elif attr_type is Arena:
+            setattr(self, internal_name, SharedArena(buf=self.buf[offset:offset+SharedArena.size]))
+            offset += SharedArena.size
 
 # Should effectivly emulate ConsoleDict, but stores its values in a named shared memory buffer
 class SharedConsoleDict(vars.ConsoleDict):
@@ -328,59 +384,41 @@ class SharedConsoleDict(vars.ConsoleDict):
     def __init__(self, buf: memoryview):
         super().__init__()
         self.buf = buf
-        offset: int = 0
-        for k, v in vars.asdict(vars.DefaultConsoleDict()).items():
-            internal_name: str = f'_{k}'
-            attr_type: type = type(getattr(self, internal_name))
-            if issubclass(attr_type, bool):
-                setattr(self, internal_name, ctypes.c_uint8.from_buffer(self.buf[offset:offset+ctypes.sizeof(ctypes.c_uint8)]))
-                offset += ctypes.sizeof(ctypes.c_uint8)
-                getattr(self, internal_name).value = bool(v)
-            elif issubclass(attr_type, int):
-                setattr(self, internal_name, ctypes.c_int32.from_buffer(self.buf[offset:offset+ctypes.sizeof(ctypes.c_int32)]))
-                offset += ctypes.sizeof(ctypes.c_int32)
-                getattr(self, internal_name).value = int(v)
-            elif issubclass(attr_type, float):
-                setattr(self, internal_name, ctypes.c_double.from_buffer(self.buf[offset:offset+ctypes.sizeof(ctypes.c_double)]))
-                offset += ctypes.sizeof(ctypes.c_double)
-                getattr(self, internal_name).value = float(v)
-            elif issubclass(attr_type, str):
-                val: bytes = str(v).encode()
-                setattr(self, internal_name, self.buf[offset:offset+255])
-                offset += 255
-                getattr(self, internal_name)[:] = val[:]
-            elif attr_type is Arena:
-                setattr(self, internal_name, SharedArena(buf=self.buf[offset:offset+SharedArena.size]))
-                offset += SharedArena.size
+        copy_default_params_to_shared(self, vars.DefaultConsoleDict)
+        
 
-for _attr, _type in vars.DefaultConsoleDict.__annotations__.items():
-    if issubclass(_type, bool):
-        setattr(SharedConsoleDict, _attr, create_shared_property(_attr, bool))
-        SharedConsoleDict.size += ctypes.sizeof(ctypes.c_uint8)
-    elif issubclass(_type, int):
-        setattr(SharedConsoleDict, _attr, create_shared_property(_attr, int))
-        SharedConsoleDict.size += ctypes.sizeof(ctypes.c_int32)
-    elif issubclass(_type, float):
-        setattr(SharedConsoleDict, _attr, create_shared_property(_attr, float))
-        SharedConsoleDict.size += ctypes.sizeof(ctypes.c_double)
-    elif issubclass(_type, str):
-        def getter(self):
-            return str(getattr(self, _attr))
-        def setter(self, value):
-            raise NotImplementedError()
-        setattr(SharedConsoleDict, _attr, property(getter, setter))
-        SharedConsoleDict.size += 255
-    elif _type is Arena:
-        SharedConsoleDict.size += SharedArena.size
+def attach_shared_property(base_class: type, shared_class: type):
+    for _attr, _type in base_class.__annotations__.items():
+        if issubclass(_type, bool):
+            setattr(shared_class, _attr, create_shared_property(_attr, bool))
+            shared_class.size += ctypes.sizeof(ctypes.c_uint8)
+        elif issubclass(_type, int):
+            setattr(shared_class, _attr, create_shared_property(_attr, int))
+            shared_class.size += ctypes.sizeof(ctypes.c_int32)
+        elif issubclass(_type, float):
+            setattr(shared_class, _attr, create_shared_property(_attr, float))
+            shared_class.size += ctypes.sizeof(ctypes.c_double)
+        elif issubclass(_type, str):
+            def getter(self):
+                return str(getattr(self, _attr))
+            def setter(self, value):
+                raise NotImplementedError()
+            setattr(shared_class, _attr, property(getter, setter))
+            shared_class.size += 255
+        elif _type is Arena:
+            shared_class.size += SharedArena.size
+attach_shared_property(vars.DefaultConsoleDict, SharedConsoleDict)
 
 class SharedGUIDict(vars.GUIDict):
-    size: int = -1
+    size: int = 0
 
     def __init__(self, buf: memoryview):
+        super().__init__()
         self.buf = buf
+        copy_default_params_to_shared(self, vars.DefaultGUIDict)
+attach_shared_property(vars.DefaultGUIDict, SharedGUIDict)
 
 if __name__ == '__main__':
-    import simulation
     sm = create_shared_memory(SharedConsoleDict.size)
     tmp = SharedConsoleDict(sm)
 
