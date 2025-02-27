@@ -152,6 +152,8 @@ class Player:
     # Increments the players score for when the player collects a goal
     def collect_goal(self):
         self.score += 100
+        self.positions.clear()
+        self.positions.append(Point.copy(self.point))
     
     def __str__(self) -> str:
         return str(self.point)
@@ -218,12 +220,19 @@ class PathCache:
     def fromjson(cls, jstr: str) -> 'PathCache':
         tmp = cls()
         j: dict[str, list[dict[str, int]] | None] = json.loads(jstr)
+        handle = log.parent.handlers[0]
+        term = handle.terminator
+        handle.terminator = ""
+        count: int = 0
         for pair, path in j.items():
             pair = PathPair.fromstr(pair)
             if path is not None:
                 path = [{k: int(v) for k, v in p.items()} for p in path]
                 path = [Point(**kwargs) for kwargs in path]
+            log.debug(f'Loaded path: {count}    \r')
             tmp.cache.setdefault(pair, path)
+            count += 1
+        handle.terminator = term
         return tmp
 
     @classmethod

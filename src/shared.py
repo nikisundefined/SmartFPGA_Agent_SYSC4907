@@ -34,6 +34,19 @@ PathPair = simulation.PathPair
 import vars
 log: logging.Logger = logging.getLogger('model.shared')
 
+def push_log_terminiator() -> dict[logging.Handler, str]:
+    ret: dict[logging.Handler, str] = {}
+    for h in logging.getLogger('model').handlers:
+        if isinstance(h, logging.StreamHandler):
+            ret.setdefault(h, h.terminator)
+            h.terminator = ""
+    return ret
+
+def pop_log_terminator(terms: dict[logging.Handler, str]) -> None:
+    for h in logging.getLogger('model').handlers:
+        if h in terms:
+            h.terminator = terms[h]
+
 # Setup the collection of all shared memory segments to cleanup on exit
 if 'shm_names' not in globals():
     global shm_names
@@ -154,9 +167,8 @@ class SharedPoint(Point):
             buf = buf.buf
         assert buf.nbytes >= 8, "Not enough space in the given buffer"
         self.buf: memoryview = buf
-        self._x = ctypes.c_uint32.from_buffer(buf[:4])
-        self._y = ctypes.c_uint32.from_buffer(buf[4:])
-        self.arr = np.ndarray((2,), dtype=np.int32, buffer=buf[:8])
+        self._x = ctypes.c_int32.from_buffer(buf[:4])
+        self._y = ctypes.c_int32.from_buffer(buf[4:])
 
     def __iadd__(self, other: Point | Player | Direction) -> None:
         if type(other) is Direction:
@@ -228,11 +240,17 @@ class SharedPathCache(PathCache):
                 log.warning(f"Attempted to load SharedPathCache object with insufficient space in internal buffer: {0 if self.buf is None else self.buf.nbytes} < {nbytes}")
                 self.buf = create_shared_memory(nbytes)
         offset: int = 0
+        count: int = 0
         self.paths.clear() # Reset the internal mapping of points
+        # TODO: apparently this method of loading is extremely slow
+        tmp = push_log_terminiator()
         for k, v in cache.cache.items():
             nbytes = 0 if v is None else len(v) * SharedPoint.size 
             self.paths.setdefault(k, v if v is None else SharedPoint.convertpointlist(v, self.buf[offset:offset+nbytes]))
             offset += nbytes
+            log.debug(f'Loaded path {count}    \r')
+            count += 1
+        pop_log_terminator(tmp)
 
     def keys(self) -> dict[PathPair, int]:
         return {k: 0 if v is None else len(v) for k, v in self.paths.items()}

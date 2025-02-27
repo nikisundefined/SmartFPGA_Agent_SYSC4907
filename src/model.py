@@ -48,11 +48,8 @@ PathCache = simulation.PathCache
 # TODO:
 # Short Term:
 #   Investigate large pause when t ~= int(t)
-#   Investigate if path cache is actually being used
 #   Add Comments to all new code
-#   Add many more logs to all function
-#   Reset positions after collecting the goal
-#   Increase reward after collecting goal
+#   Add many more logs to all functions
 #   Determine the source of the memory leak at shutdown
 # Long Term:
 #   Find better inputs
@@ -156,11 +153,13 @@ def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
 # Moves the agent in the arena based on the index of the largest value provided
 # Only moves the agent every 1 second
 def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
+    GOAL_COLLECT_REWARD: float = 0.0
+
     if t == 0.0 and x is None and cvar.in_gui:
         gui.update_text(start_time=time.time())
     if not math.isclose(t, int(t)):
         return
-    log.info(f"Move at {round(t, 2)} ===================>")
+    log.info(f"Move at {round(t, 2)} ======================================>")
 
     # Determine the action to perform (Direction to move)
     index = int(np.argmax(x))
@@ -192,7 +191,9 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         if cvar.in_gui:
             gui.update_text(score=cvar.arena.player.score)
         if cvar.reward_reset:
-            cvar.reward = 1.0
+            cvar.reward = vars.DefaultConsoleDict.reward
+        else:
+            cvar.reward += GOAL_COLLECT_REWARD
     cvar.action_performed = True
     log.debug(f"Current detection: {detection(0)}")
 
@@ -242,8 +243,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     if not cvar.action_performed:
         return err
     cvar.action_performed = False
-    log.debug(f'  Best Direction is: {best_direction.name}')
-    log.debug(f'  Best Path: {path[1:-1]}')
+    log.debug(f'Best Direction is: {best_direction.name}')
+    log.debug(f'Best Path: {path[1:-1]}')
 
     # Compute the reward value for the current timestep
     def reward(player: Player, player_moved: bool, path: list[Point]) -> float:
@@ -294,23 +295,23 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         # Punish the agent for returning to the same points
         if len(player.positions) > 5:
             unique_positions: int = len(set(player.positions[-5:]))
-            log.debug(f"  Unique Positions: {unique_positions}")
+            log.debug(f"Unique Positions: {unique_positions}")
             if unique_positions <= 2:
                 reward -= REPEAT_POSITIONS_PENALTY
             elif unique_positions <= 4:
                 reward -= MANY_REPEAT_POSITIONS_PENALTY
-        log.debug(f"  Instantaneous Reward: {reward}")
+        log.debug(f"Instantaneous Reward: {reward}")
         return reward
 
     # Adjust the current state based on the current reward
     cvar.reward += reward(cvar.arena.player, cvar.player_moved, path)
     # Ensure that the minimum reward state possible is 1 for the later division to always succeed
-    cvar.reward = max(cvar.reward, 1)
+    cvar.reward = max(cvar.reward, 1.0)
 
     # Recompute the error with the updated reward
     err = err_calc(best_direction)
-    log.debug(f'  Updated error to: {err}')
-    log.debug(f'  Updated reward to: {cvar.reward}')
+    log.debug(f'Updated error to: {err}')
+    log.debug(f'Updated reward to: {cvar.reward}')
 
     return err
 
@@ -638,6 +639,7 @@ if __name__ == '__main__':
         exit(1)
 
 if '__page__' in locals():
+    logging.root.handlers = [handle]
     # Check if the local gui is running and set flag
     for t in threading.enumerate():
         if t.name == 'GUI':
@@ -645,7 +647,6 @@ if '__page__' in locals():
             cvar.in_gui = True
             break
     nengo.logger.setLevel(logging.WARNING)
-    logging.root.handlers = [handle]
     log.info('Setting up for NengoGUI')
     # Create the model
     global model
