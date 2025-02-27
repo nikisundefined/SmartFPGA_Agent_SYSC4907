@@ -445,9 +445,7 @@ class Arena:
     def absolute_distance(self) -> float:
         return math.sqrt((self.player.x - self.goal.x) ** 2 + (self.player.y - self.goal.y) ** 2)
     
-    def _distance(self, pathKey: PathPair, start: Point, end: Point) -> list[Point] | None:
-        log.warning(f'  simulation.Arena: Distance cache miss {pathKey}')
-
+    def _distance(self, start: Point, end: Point) -> list[Point] | None:
         # Define function to calculate neighbors of points
         def neighbors(p: Point, arena: 'Arena' = self) -> list[Point]:
             # All direct neighbor points
@@ -491,11 +489,12 @@ class Arena:
         with Arena.path_cache_lock:
             if pathKey in self.path:
                 return self.path[pathKey]
-        tmp = self._distance(pathKey)
+        log.warning(f"Path {pathKey} not found in cache")
+        tmp = self._distance(start, end)
         # Update the path cache
         with Arena.path_cache_lock:
             self.path[pathKey] = tmp
-        log.debug(f'  Computed path from {start} to {end} as: {tmp}')
+        log.debug(f'Computed path from {start} to {end} as: {tmp}')
         return tmp
     
     # Textual representation of the grid
@@ -513,51 +512,6 @@ class Arena:
                     s += "G"
             s += "\n"
         return s
-
-    # Converts the grid into a 2D texture with the given colors and block size
-    def display(self, block_size: int = 10, wall_color: list[float] | None = None, player_color: list[float] | None = None, goal_color: list[float] | None = None) -> np.ndarray:
-        COLOR_DEPTH: int = 4
-        if wall_color is None:
-            wall_color = [0, 0, 255 / 255, 255 / 255]
-        if player_color is None:
-            player_color = [255 / 255, 255 / 255, 0, 255 / 255]
-        if goal_color is None:
-            goal_color = [0, 255 / 255, 0, 255 / 255]
-
-        wall_color:   np.ndarray = np.array(wall_color, dtype=np.float32)
-        player_color: np.ndarray = np.array(player_color, dtype=np.float32)
-        goal_color:   np.ndarray = np.array(goal_color, dtype=np.float32)
-
-        if max(wall_color) > 255:
-            wall_color /= 255
-        if max(player_color) > 255:
-            player_color /= 255
-        if max(goal_color) > 255:
-            goal_color /= 255
-        
-        texture_data: np.ndarray = np.zeros((self.n * block_size, self.m * block_size, COLOR_DEPTH))
-        PATH_COLOR: np.ndarray = np.array([255 / 255, 0, 0, 255 / 255], dtype=np.float32)
-        _map: dict[int, list[float]] = {
-            Arena.EMPTY: np.array([0, 0, 0,0], dtype=np.float32), # Black
-            Arena.WALL: wall_color, # Blue
-            Arena.PLAYER: player_color, # Yellow
-            Arena.GOAL: goal_color, # Green
-        }
-        path: list[Point] = self.distance()
-
-        for y in range(self.m):
-            for oy in range(block_size):
-                for x in range(self.n):
-                    for ox in range(block_size):
-                        coord_y: int = y * block_size + oy
-                        coord_x: int = x * block_size + ox
-                        if Point(x, y) in path and self.grid[y][x] == Arena.EMPTY and (ox > 2 and ox < 8) and (oy > 2 and oy < 8):
-                            texture_data[coord_y][coord_x] = PATH_COLOR
-                        else:
-                            texture_data[coord_y][coord_x] = _map[self.grid[y][x]]
-        texture_data *= 255
-        texture_data = texture_data.astype(np.uint8)
-        return texture_data
 
 def main():
     while key != 'q':

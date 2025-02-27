@@ -89,7 +89,7 @@ def create_shared_property(name: str, attr_type: type) -> property:
         return attr_type(getattr(self, f'_{name}').value)
     def setter(self, value):
         if not isinstance(value, attr_type):
-            raise TypeError(f'')
+            raise TypeError(f'{type(value)} is not assignable to {attr_type} for attribute {name}')
         getattr(self, f'_{name}').value = value
     def deleter(self):
         delattr(self, f'_{name}')
@@ -225,6 +225,7 @@ class SharedPathCache(PathCache):
                 nbytes += 0 if v is None else len(v) * SharedPoint.size
             # If there is enough space in the internal buffer, do not allocate a new one
             if self.buf is None or self.buf.nbytes < nbytes:
+                log.warning(f"Attempted to load SharedPathCache object with insufficient space in internal buffer: {0 if self.buf is None else self.buf.nbytes} < {nbytes}")
                 self.buf = create_shared_memory(nbytes)
         offset: int = 0
         self.paths.clear() # Reset the internal mapping of points
@@ -341,13 +342,14 @@ class SharedArena(Arena):
         assert start is not None and end is not None and pathKey is not None
         if pathKey in SharedArena.shared_path_cache:
             return SharedArena.shared_path_cache[pathKey]
+        log.warning(f'Entry not found in path cache: {pathKey}')
         with Arena.path_cache_lock:
             if pathKey in Arena.path_cache:
                 return Arena.path_cache[pathKey]
-        tmp = self._distance(pathKey, start, end)
+        tmp = self._distance(start, end)
         # Update the path cache
         Arena.path_cache[pathKey] = tmp
-        log.debug(f'  Computed path from {start} to {end} as: {tmp}')
+        log.debug(f'Computed path from {start} to {end} as: {tmp}')
         return tmp
 
 def copy_default_params_to_shared(self, base_class: type):

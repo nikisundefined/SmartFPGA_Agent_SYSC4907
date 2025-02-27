@@ -12,7 +12,6 @@ handle = logging.StreamHandler(sys.stdout)
 handle.setFormatter(logging.Formatter(f'{threading.current_thread().name}[{{name}}] | {{levelname}} -> {{message}}', style='{'))
 log.addHandler(handle)
 
-
 import nengo
 import nengo.learning_rules
 import nengo.neurons
@@ -47,8 +46,15 @@ PathCache = simulation.PathCache
 #       - Replace implementation of neuron model in library with custom model
 
 # TODO:
-#   Investigate why the move function results in a large pause when actually executed
+# Short Term:
+#   Investigate large pause when t ~= int(t)
+#   Investigate if path cache is actually being used
 #   Add Comments to all new code
+#   Add many more logs to all function
+#   Reset positions after collecting the goal
+#   Increase reward after collecting goal
+#   Determine the source of the memory leak at shutdown
+# Long Term:
 #   Find better inputs
 #       - Player Position
 #       - Goal Position
@@ -154,18 +160,15 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         gui.update_text(start_time=time.time())
     if not math.isclose(t, int(t)):
         return
-    log.info(f"Move at {round(t, 2)}")
+    log.info(f"Move at {round(t, 2)} ===================>")
 
     # Determine the action to perform (Direction to move)
     index = int(np.argmax(x))
     if math.isclose(x[index],0,abs_tol=cvar.movement_threshold): # Check if the input value was larger than the threshold
-        log.info(f"  No action selected")
+        log.info(f"No action selected")
         cvar.player_moved = False
         return
 
-    # Ensure the index is in range of the enum to prevent errors
-    if index < 0 or index > 3:
-        raise IndexError(f'simulation.Direction: Index {index} out of range')
     tmp: Point = Point(cvar.arena.player.x, cvar.arena.player.y) # Store the old location
     cvar.arena.move(index) # Move the player in the arena
     delta_dist: Point = tmp - cvar.arena.player.point
@@ -173,25 +176,25 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 
     # Check if the player has stopped moving and log it
     if cvar.player_moved and tmp == cvar.arena.player:
-        log.info(f"  Player has stopped moving at {cvar.arena.player}")
+        log.info(f"Player has stopped moving at {cvar.arena.player}")
     else:
         cvar.arena.player.positions.append(tmp)
     cvar.player_moved = tmp != cvar.arena.player
 
-    log.debug(f"  Direction {Direction(index).name} {x}")
-    log.info(f"  Player Location: {cvar.arena.player} -> {Direction(index).name} | Goal Location: {cvar.arena.goal}")
+    log.debug(f"Direction {Direction(index).name} {x}")
+    log.info(f"Player Location: {cvar.arena.player} | Goal Location: {cvar.arena.goal}")
 
     # Update the goal location when the agent reaches the goal
     if cvar.arena.on_goal():
-        log.info("  Agent reached the goal")
+        log.info("Agent reached the goal")
         cvar.arena.set_goal()
-        log.debug(f"  Player score is now: {cvar.arena.player.score}")
+        log.debug(f"Player score is now: {cvar.arena.player.score}")
         if cvar.in_gui:
             gui.update_text(score=cvar.arena.player.score)
         if cvar.reward_reset:
             cvar.reward = 1.0
     cvar.action_performed = True
-    log.debug(f"  Current detection: {detection(0)}")
+    log.debug(f"Current detection: {detection(0)}")
 
     if cvar.in_gui:
         gui.update_grid(cvar.arena)
@@ -308,7 +311,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     err = err_calc(best_direction)
     log.debug(f'  Updated error to: {err}')
     log.debug(f'  Updated reward to: {cvar.reward}')
-    
+
     return err
 
 # Get the distance to a wall in every direction starting from the agent
@@ -328,36 +331,38 @@ def create_model_fpga():
 
         # Nodes (interaction with simulation)
         # Detection distance input
-        dist_in = nengo.Node(
-            output=detection,
-            size_out=cvar.input_dimensions,
-            label='Distance Input Node'
-        )
-        g_dist = nengo.Node(
-            output=goal_path_distance,
-            size_out=1,
-            label='Goal Path Distance'
-        )
-        best_dir = nengo.Node(
-            output=goal_best_direction,
-            size_out=1,
-            label='Goal Best Direction'
-        )
-        g_pnt = nengo.Node(
-            output=goal_point_distance,
-            size_out=2,
-            label='Goal Point Distance'
-        )
-        p_loc = nengo.Node(
-            output=player_location,
-            size_out=2,
-            label='Player Location'
-        )
-        g_loc = nengo.Node(
-            output=goal_location,
-            size_out=2,
-            label='Goal Location'
-        )
+        if not cvar.alt_input:
+            dist_in = nengo.Node(
+                output=detection,
+                size_out=cvar.input_dimensions,
+                label='Distance Input Node'
+            )
+        # g_dist = nengo.Node(
+        #     output=goal_path_distance,
+        #     size_out=1,
+        #     label='Goal Path Distance'
+        # )
+        # best_dir = nengo.Node(
+        #     output=goal_best_direction,
+        #     size_out=1,
+        #     label='Goal Best Direction'
+        # )
+        # g_pnt = nengo.Node(
+        #     output=goal_point_distance,
+        #     size_out=2,
+        #     label='Goal Point Distance'
+        # )
+        else:
+            p_loc = nengo.Node(
+                output=player_location,
+                size_out=2,
+                label='Player Location'
+            )
+            g_loc = nengo.Node(
+                output=goal_location,
+                size_out=2,
+                label='Goal Location'
+            )
 
         # Movement output
         mov_out = nengo.Node(
@@ -640,6 +645,7 @@ if '__page__' in locals():
             cvar.in_gui = True
             break
     nengo.logger.setLevel(logging.WARNING)
+    logging.root.handlers = [handle]
     log.info('Setting up for NengoGUI')
     # Create the model
     global model
