@@ -48,6 +48,7 @@ PathCache = simulation.PathCache
 # TODO:
 # Short Term:
 #   Investigate large pause when t ~= int(t)
+#   Implement binary key import/export
 #   Add Comments to all new code
 #   Add many more logs to all functions
 #   Determine the source of the memory leak at shutdown
@@ -72,18 +73,19 @@ PathCache = simulation.PathCache
 
 # Setup the variables for the model
 cvar = vars.cvar
+gvar = vars.gvar
 log.setLevel(cvar.log_level)
 
+# If the shared cache is not loaded and the cache file exists, attempt to load it
 if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exists():
-    # Path cache is not loaded, and the file to load it exists
     attached: bool = False
     try:
-        # Check if the cache is stored in shared memory
+        # Check if the cache is already stored in shared memory
         tmp = shared.create_shared_memory(0, 'path_cache', shared.AttachFlag.ATTACH)
         log.info('Found path cache in shared memory')
         # Ensure it is the correct size
         if tmp.nbytes < shared.SharedPathCache.size:
-            log.warning(f'Shared memory region for path cache is incorrect size: {tmp.nbytes}')
+            log.warning(f'Shared memory region for path cache is incorrect size: {tmp.nbytes} < {shared.SharedPathCache.size}')
             tmp.release()
             # Not the right size, remove it and reallocate
             elem: multiprocessing.shared_memory.SharedMemory = None
@@ -94,18 +96,25 @@ if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exist
                     elem = name
                     break
             shared.shm_names.remove(elem)
+            # Raise error to execute code related to loading from file
             raise BufferError()
         attached = True
+        keys = shared.create_shared_memory(0, 'path_cache_keys', shared.AttachFlag.ATTACH)
     except:
         log.info('Could not find shared memory region for path cache, loading from file')
         # Could not load from shared memory, load from file instead
         Arena.path_cache = PathCache.fromfile(cvar.path_cache_file.absolute())
+        log.info(f'Loaded {len(Arena.path_cache)} paths from {cvar.path_cache_file.absolute()}')
         nbytes: int = Arena.path_cache.count() * shared.SharedPoint.size
         tmp = shared.create_shared_memory(nbytes, 'path_cache')
     
+    # Prepare the SharedPathCache
     shared.SharedArena.shared_path_cache = shared.SharedPathCache(tmp)
-    log.info(f'Found path cache file at: {cvar.path_cache_file.absolute()}')
-    shared.SharedArena.shared_path_cache.load(Arena.path_cache)
+    # Load differently based on if the path cache was already stored in memory
+    if attached:
+        shared.SharedArena.shared_path_cache.loadkeys(keys)
+    else:
+        shared.SharedArena.shared_path_cache.load(Arena.path_cache)
     log.info(f"Loaded {len(shared.SharedArena.shared_path_cache)} paths from cache")
 
 ### Input Node Functions ###
@@ -155,8 +164,7 @@ def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
 def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     GOAL_COLLECT_REWARD: float = 0.0
 
-    if t == 0.0 and x is None and cvar.in_gui:
-        gui.update_text(start_time=time.time())
+    # Only attempt to move when t is an integer, ex. 1, 2, 3, ...
     if not math.isclose(t, int(t)):
         return
     log.info(f"Move at {round(t, 2)} ======================================>")
@@ -171,7 +179,13 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     tmp: Point = Point(cvar.arena.player.x, cvar.arena.player.y) # Store the old location
     cvar.arena.move(index) # Move the player in the arena
     delta_dist: Point = tmp - cvar.arena.player.point
-    cvar.last_action = Direction.NONE if tmp == cvar.arena.player else (Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == cvar.arena.n - 1 else delta_dist.asdirection()) # Store the direction moved or 
+    # Store the direction moved
+    if tmp == cvar.arena.player:
+        cvar.last_action == Direction.NONE # None if the player did not move
+    elif abs(delta_dist.x) == cvar.arena.n - 1:
+        cvar.last_action = Point(np.sign(delta_dist.x), 0).asdirection() # Special case to handle wrapping
+    else:
+        cvar.last_action = delta_dist.asdirection() # Generic form convert change in location to a direction
 
     # Check if the player has stopped moving and log it
     if cvar.player_moved and tmp == cvar.arena.player:
@@ -188,8 +202,6 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         log.info("Agent reached the goal")
         cvar.arena.set_goal()
         log.debug(f"Player score is now: {cvar.arena.player.score}")
-        if cvar.in_gui:
-            gui.update_text(score=cvar.arena.player.score)
         if cvar.reward_reset:
             cvar.reward = vars.DefaultConsoleDict.reward
         else:
@@ -197,8 +209,8 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     cvar.action_performed = True
     log.debug(f"Current detection: {detection(0)}")
 
-    if cvar.in_gui:
-        gui.update_grid(cvar.arena)
+    if gvar.in_gui:
+        gui.update_grid()
 
 ### End Output Node Functions ###
 
@@ -590,7 +602,7 @@ def main():
     dpg.destroy_context()
 
 def web_gui():
-    gui.create_gui(cvar.arena)
+    gui.create_gui()
     
     gui.display_gui() # Display GUI
     while dpg.is_dearpygui_running():
@@ -598,6 +610,8 @@ def web_gui():
         dpg.run_callbacks(jobs)
 
         gui.update_text() # Update text boxes in the gui
+        if not gvar.in_gui:
+            break
 
         dpg.render_dearpygui_frame() # Render the updated frame to the GUI
         time.sleep(0.1)
@@ -609,12 +623,17 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         if '--nengo' in sys.argv:
             # Start the gui in another thread
-            t = threading.Thread(target=web_gui, name='GUI', daemon=True)
+            gvar.in_gui = True
+            t = threading.Thread(target=web_gui, name='GUI')
             t.start()
             # Start the nengo web gui in the main thread
             g = nengo_gui.GUI(filename=__file__, editor=True)
             g.start()
+            gvar.in_gui = False
+            t.join(5)
             # Ensure all references to shared memory are removed before exiting
+            del cvar
+            del gvar
             del vars.cvar
             del vars.gvar
             del shared.SharedArena.shared_path_cache
@@ -644,7 +663,7 @@ if '__page__' in locals():
     for t in threading.enumerate():
         if t.name == 'GUI':
             log.info('Found gui')
-            cvar.in_gui = True
+            gvar.in_gui = True
             break
     nengo.logger.setLevel(logging.WARNING)
     log.info('Setting up for NengoGUI')
@@ -652,3 +671,23 @@ if '__page__' in locals():
     global model
     model: nengo.Network = None
     create_model_fpga()
+
+    def on_start(sim: nengo.Simulator):
+        gvar.seed = sim.seed
+        gvar.start_time = time.time()
+        gvar.run_timer = True
+
+    def on_pause(sim: nengo.Simulator):
+        gvar.end_time = time.time()
+        gvar.offset_start_time = time.time()
+        gvar.run_timer = False
+    
+    def on_continue(sim: nengo.Simulator):
+        gvar.offset_time += time.time() - gvar.offset_start_time
+        gvar.run_timer = True
+
+    def on_step(sim: nengo.Simulator):
+        gvar.sim_time = sim.time
+    
+    def on_close(sim: nengo.Simulator):
+        log.info(f'Finished simulation after running {sim.n_steps} steps')

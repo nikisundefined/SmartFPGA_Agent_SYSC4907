@@ -8,7 +8,6 @@ import logging
 import inspect
 import simulation
 from enum import IntEnum
-# from simulation import Arena, Player, Point, Direction, PathCache, PathPair
 
 Arena = simulation.Arena
 Player = simulation.Player
@@ -57,6 +56,7 @@ if 'shm_names' not in globals():
         for name, pair in shm_names.items():
             if pair[1]:
                 try:
+                    pair[0].buf.release()
                     pair[0].close()
                     pair[0].unlink()
                 except Exception as e:
@@ -256,7 +256,10 @@ class SharedPathCache(PathCache):
         return {k: 0 if v is None else len(v) for k, v in self.paths.items()}
 
     # Loads the cache from the internal buf with the given keys and lengths
-    def loadkeys(self, keys: dict[PathPair, int]) -> None:
+    def loadkeys(self, keys: dict[PathPair, int] | memoryview) -> None:
+        if type(keys) is memoryview:
+            raise NotImplementedError()
+
         count: int = sum(keys.values())
         if self.buf.nbytes < count * SharedPoint.size:
             raise BufferError("Internal buffer does not contain enough information for the given set of keys")

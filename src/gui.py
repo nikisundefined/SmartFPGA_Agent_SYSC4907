@@ -24,7 +24,9 @@ def fill_tile(grid: np.ndarray, x: int, y: int, color: list[float], block_size: 
             grid[y + oy][x + ox] = np.array(color)
 
 # Updates the grid text with the current state of the arena
-def update_grid(arena: simulation.Arena, block_size: int = 10, tag: str | int = 'Environment'):
+def update_grid(arena: simulation.Arena | None = None, block_size: int = 10, tag: str | int = 'Environment'):
+    if arena is None:
+        arena = vars.gvar.arena
     texture_data: list[float] = []
     PATH_COLOR: list[float] = [255 / 255, 0, 0, 255 / 255] # Color of the path
     _map: dict[int, list[float]] = {
@@ -63,7 +65,9 @@ def move(sender, app_data, user_data: simulation.Direction):
         print(f"DEBUG: {arena.player}")
         print(f"DEBUG: {arena}")
 
-def create_gui(arena: simulation.Arena, rows: int = 23, columns = 23, block_size: int = 10):
+def create_gui(arena: simulation.Arena | None = None, rows: int = 23, columns = 23, block_size: int = 10):
+    if arena is None:
+        arena = vars.gvar.arena
     VIEWPORT_WIDTH: int = round((rows * block_size) / 100.0 + 0.5) * 100
     VIEWPORT_HEIGHT: int = round((columns * block_size) / 100.0 + 0.5) * 100
 
@@ -85,6 +89,7 @@ def create_gui(arena: simulation.Arena, rows: int = 23, columns = 23, block_size
         dpg.add_image("Environment", width=texture_width, height=texture_height, pos=[hori_offset, vert_offset])
         dpg.add_text(f'Score: {arena.player.score}', tag='score')
         dpg.add_text('Time: 0.0', tag='time')
+        dpg.add_text(f"{vars.gvar.seed}", tag='seed')
     
     dpg.add_value_registry(tag='value_registry')
     dpg.add_float_value(tag='timer', parent='value_registry')
@@ -112,6 +117,22 @@ def update_text(score: int | None = None, start_time: float | None = None):
     tim_rect = dpg.get_item_rect_size('time')
     dpg.set_item_pos('time', [dpg.get_viewport_width()/2-tim_rect[0]/2, txt_rect[1]])
     dpg.set_value('time', f'Time: {round(time.time() - start_time, 1)}')
+
+def update_text():
+    cvar = vars.cvar
+    gvar = vars.gvar
+
+    # Always update the score text box and reposition accordingly
+    dpg.set_value('score', f'Score: {cvar.arena.player.score}')
+    txt_rect = dpg.get_item_rect_size('score')
+    dpg.set_item_pos('score', [dpg.get_viewport_width()/2-txt_rect[0]/2, 0])
+
+    dpg.set_value('seed', f'{gvar.seed}')
+    dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265])
+
+    dpg.set_value('time', f"Time {round(gvar.sim_time, 1)}")
+    tim_rect = dpg.get_item_rect_size('time')
+    dpg.set_item_pos('time', [dpg.get_viewport_width()/2-tim_rect[0]/2, txt_rect[1]])
 
 if __name__ == "__main__":
     import time

@@ -119,8 +119,18 @@ class DefaultGUIDict:
     in_gui: bool = False
     # The start time of the current simulation
     start_time: float = 0.0
+    # The end time of the current simulation state (only relevent when run_timer is False)
+    end_time: float = 0.0
     # The current seed of the simulation
     seed: int = -1
+    # Should the timer be running
+    run_timer: bool = False
+    # Start time for offset calculation
+    offset_start_time: float = 0.0
+    # Total offset time
+    offset_time: float = 0.0
+    # The current simulator time
+    sim_time: float = 0.0
 
 # Stores all variables related to the local and nengo gui representation
 class GUIDict:
