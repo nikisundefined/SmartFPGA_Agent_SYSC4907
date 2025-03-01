@@ -334,6 +334,11 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
     return tmp.clip(0, 1)
 
+def inhibt(t: float, cvar: AttrDict = cvar) -> np.ndarray:
+    if cvar.learning:
+        return np.zeros((cvar.ensemble_neurons,cvar.error_dimensions))
+    return -1000*np.ones((cvar.ensemble_neurons, cvar.error_dimensions))
+
 def create_model_fpga():
     global model
     # Global model definition for use with NengoGUI
@@ -376,6 +381,11 @@ def create_model_fpga():
                 size_out=2,
                 label='Goal Location'
             )
+        learn_inhibit = nengo.Node(
+            output=inhibt,
+            size_out=cvar.error_dimensions,
+            label='Learning Inhibit Node'
+        )
 
         # Movement output
         mov_out = nengo.Node(
@@ -470,6 +480,11 @@ def create_model_fpga():
             pre=err,
             post=fpga.error,
             label='Learning Connection'
+        )
+        conn_inhibit = nengo.Connection(
+            pre=err,
+            post=err.neurons,
+            label='Error Inhibit Connection'
         )
 
 def create_model():

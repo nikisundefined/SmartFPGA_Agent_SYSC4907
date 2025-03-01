@@ -6,7 +6,6 @@ import json
 import numpy as np
 import pathlib
 import simulation
-# from simulation import Arena, Direction
 from dataclasses import dataclass, asdict
 
 Arena = simulation.Arena
@@ -89,6 +88,8 @@ class DefaultConsoleDict:
     alt_input: bool = True
     # Should the reward reset after collecting a goal
     reward_reset: bool = False
+    # Is the model still learning
+    learning: bool = True
 
 # Access classs for Console Variables with local storage
 class ConsoleDict:
@@ -107,7 +108,9 @@ class SharedDict:
     cvars_name: str = 'cvars'
     # Name of the shared memory that contains the gvars structure
     gvars_name: str = 'gvars'
+    # Name of the shared memory that contains the agent structure
     player_name: str = 'agent'
+    # Name of the shared memory that contains the arena structure
     arena_name: str = 'arena'
 
 # Store variables related to the GUI implementation that should be shared between all GUI implementations

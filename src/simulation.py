@@ -188,6 +188,7 @@ class Player:
 
 # Helper class for caching A* paths
 class PathPair:
+    # Convert the str representation to a PathPair object
     @classmethod
     def fromstr(cls, s: str) -> 'PathPair':
         s = s.strip('[]')
@@ -216,10 +217,12 @@ class PathPair:
         return hash(str(self))
 
 class PathCache:
+    # Convert a json string of a path cache into a PathCache object
     @classmethod
     def fromjson(cls, jstr: str) -> 'PathCache':
         tmp = cls()
         j: dict[str, list[dict[str, int]] | None] = json.loads(jstr)
+        # Hack to store the line end char for the logging handler, to be able to print on the same line multiple times
         handle = log.parent.handlers[0]
         term = handle.terminator
         handle.terminator = ""
@@ -232,9 +235,11 @@ class PathCache:
             log.debug(f'Loaded path: {count}    \r')
             tmp.cache.setdefault(pair, path)
             count += 1
+        # Restore the line ending
         handle.terminator = term
         return tmp
 
+    # Helper method to load a json file into a string before processing it with the above method
     @classmethod
     def fromfile(cls, f: str) -> 'PathCache':
         p: pathlib.Path = pathlib.Path(f)
@@ -243,6 +248,7 @@ class PathCache:
         txt: str = p.read_text()
         return cls.fromjson(txt)
 
+    # Returns the number of Point objects stored in this PathCache, for using in computing the amount of memory needed to store this PathCache object
     def count(self) -> int:
         count: int = 0
         for _, v in self.cache.items():
@@ -276,6 +282,25 @@ class Arena:
     _goal_start: Point = Point(11, 9) # Initial starting point for the goal
     path_cache: PathCache = PathCache()
     path_cache_lock: threading.RLock = threading.RLock()
+
+    @classmethod
+    def fromgrid(cls, grid: np.ndarray) -> 'Arena':
+        assert len(grid.shape) == 2, f"Arena grids must be 2D not {len(grid.shape)}D"
+        # Create and initalize Arena structure with the new grid
+        ret = cls()
+        shape = grid.shape
+        ret.n = shape[0]
+        ret.m = shape[1]
+        ret.grid = grid.copy()
+
+        # Ensure the player and goal are not starting in a wall
+        if ret._tile(ret.player) == Arena.WALL:
+            ret.player.point = ret._random_tile()
+        if ret._tile(ret.goal) == Arena.WALL:
+            ret.goal = ret._random_tile()
+        
+        return ret
+
     
     def __init__(self, n: int = 23, m: int = 23):
         self.n: int = n
@@ -283,7 +308,7 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
-        # self.paths: PathCache = Arena.path_cache
+        assert self.grid[self.player.y][self.player.x] != Arena.WALL
         assert self.grid[self.goal.y][self.goal.x] != Arena.WALL
     
     def __json__(self) -> dict[str]:
@@ -324,6 +349,15 @@ class Arena:
         grid[Arena._player_start.y][Arena._player_start.x] = cls.PLAYER # Default player position
         grid[Arena._goal_start.y][Arena._goal_start.x] = cls.GOAL # Default goal position
         return grid
+    
+    # Returns a random point on the grid that is empty
+    def _random_tile(self) -> Point:
+        tmp = Point(np.random.randint(0, self.n), np.random.randint(0, self.m))
+        while self._tile(tmp) == self.WALL:
+            tmp.x = np.random.randint(0, self.n)
+            tmp.y = np.random.randint(0, self.m)
+        return tmp
+
 
     # Polymorphic method to access _tile_pnt and _tile_pos
     def _tile(self, *args, **kwargs) -> int:
@@ -422,6 +456,8 @@ class Arena:
         while self._tile(self.player, offset_y=-dist_up) != int(Arena.WALL):
             dist_up += 1
             if dist_up > self.m:
+                # Raise error if for some reason the detection manages to escape
+                #   Was a problem a few versions ago can be removed if this is no longer triggered
                 raise RuntimeError(f"Detection in upward axis escaped bounds: {self.player} -> {self.grid}")
         
         dist_down: int = 0
@@ -464,6 +500,7 @@ class Arena:
                 # If point is inbounds and not a wall, add it to the list
                 new_p: Point = _p + p
 
+                # Handle the cases where the neighbor needs to wrap
                 if new_p.x == self.n:
                     new_p.x = 0
                 elif new_p.x < 0:
@@ -495,6 +532,7 @@ class Arena:
 
         pathKey: PathPair = PathPair(start, end)
         assert start is not None and end is not None and pathKey is not None
+        # Attempt to load the path from the global cache
         with Arena.path_cache_lock:
             if pathKey in self.path:
                 return self.path[pathKey]

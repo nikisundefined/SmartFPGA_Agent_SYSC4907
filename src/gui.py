@@ -49,10 +49,7 @@ def update_grid(arena: simulation.Arena | None = None, block_size: int = 10, tag
     dpg.set_value(item=tag, value=texture_data)
 
 def move(sender, app_data, user_data: simulation.Direction):
-    global arena
-    if 'cvar' in globals():
-        global cvar
-        arena = cvar.arena
+    arena = vars.cvar.arena
 
     arena.move(simulation.Direction(user_data))
     if arena.on_goal():
@@ -65,12 +62,17 @@ def move(sender, app_data, user_data: simulation.Direction):
         print(f"DEBUG: {arena.player}")
         print(f"DEBUG: {arena}")
 
-def create_gui(arena: simulation.Arena | None = None, rows: int = 23, columns = 23, block_size: int = 10):
+def create_gui(arena: simulation.Arena | None = None, block_size: int = 10):
+    # If the arena is not given load attempt to load it from shared memory
     if arena is None:
         arena = vars.gvar.arena
+    rows: int = arena.n
+    columns: int = arena.m
+    # Compute the viewport size with extra padding
     VIEWPORT_WIDTH: int = round((rows * block_size) / 100.0 + 0.5) * 100
     VIEWPORT_HEIGHT: int = round((columns * block_size) / 100.0 + 0.5) * 100
 
+    # Texture size of the grid representation
     texture_width: int = rows * block_size
     texture_height: int = columns * block_size
 
@@ -78,11 +80,13 @@ def create_gui(arena: simulation.Arena | None = None, rows: int = 23, columns = 
     dpg.create_viewport(title='Pacman [float]', width=VIEWPORT_WIDTH, height=VIEWPORT_HEIGHT, vsync=False)
     dpg.setup_dearpygui()
 
+    # Create the grid texture and update it based on the arena state
     arena_texture: list[float] = create_texture(texture_width, texture_height)
     with dpg.texture_registry(show=False):
         dpg.add_dynamic_texture(width=texture_width, height=texture_height, default_value=arena_texture, tag='Environment')
     update_grid(arena)
 
+    # Add all elements that will be displayed to the GUI
     with dpg.window(tag="Pacman"):
         hori_offset = (dpg.get_viewport_width() - texture_width) / 2
         vert_offset = (dpg.get_viewport_height() - texture_height) / 2
@@ -94,6 +98,7 @@ def create_gui(arena: simulation.Arena | None = None, rows: int = 23, columns = 
     dpg.add_value_registry(tag='value_registry')
     dpg.add_float_value(tag='timer', parent='value_registry')
 
+    # Add key handlers for moving the agent through the gui
     with dpg.handler_registry():
         dpg.add_key_press_handler(key = dpg.mvKey_W, user_data = simulation.Direction.UP, callback=move)
         dpg.add_key_press_handler(key = dpg.mvKey_A, user_data = simulation.Direction.LEFT, callback=move)
@@ -105,19 +110,6 @@ def display_gui():
     dpg.set_value('timer', time.time())
     dpg.set_primary_window("Pacman", True)
 
-def update_text(score: int | None = None, start_time: float | None = None):
-    if start_time is not None:
-        dpg.set_value('timer', start_time)
-    else:
-        start_time = dpg.get_value('timer')
-    if score is not None:
-        dpg.set_value('score', f'Score: {score}')
-    txt_rect = dpg.get_item_rect_size('score')
-    dpg.set_item_pos('score', [dpg.get_viewport_width()/2-txt_rect[0]/2, 0])
-    tim_rect = dpg.get_item_rect_size('time')
-    dpg.set_item_pos('time', [dpg.get_viewport_width()/2-tim_rect[0]/2, txt_rect[1]])
-    dpg.set_value('time', f'Time: {round(time.time() - start_time, 1)}')
-
 def update_text():
     cvar = vars.cvar
     gvar = vars.gvar
@@ -127,9 +119,11 @@ def update_text():
     txt_rect = dpg.get_item_rect_size('score')
     dpg.set_item_pos('score', [dpg.get_viewport_width()/2-txt_rect[0]/2, 0])
 
+    # Update the value and position of the seed for this run
     dpg.set_value('seed', f'{gvar.seed}')
     dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265])
 
+    # Update the time elasped within the simulation and its position
     dpg.set_value('time', f"Time {round(gvar.sim_time, 1)}")
     tim_rect = dpg.get_item_rect_size('time')
     dpg.set_item_pos('time', [dpg.get_viewport_width()/2-tim_rect[0]/2, txt_rect[1]])

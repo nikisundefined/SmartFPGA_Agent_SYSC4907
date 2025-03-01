@@ -9,6 +9,7 @@ import inspect
 import simulation
 from enum import IntEnum
 
+# Import class names into namespace, needed due to cyclic imports
 Arena = simulation.Arena
 Player = simulation.Player
 Point = simulation.Point
@@ -33,6 +34,7 @@ PathPair = simulation.PathPair
 import vars
 log: logging.Logger = logging.getLogger('model.shared')
 
+# Store the line terminators for all handlers to allow printing on the same line
 def push_log_terminiator() -> dict[logging.Handler, str]:
     ret: dict[logging.Handler, str] = {}
     for h in logging.getLogger('model').handlers:
@@ -41,6 +43,7 @@ def push_log_terminiator() -> dict[logging.Handler, str]:
             h.terminator = ""
     return ret
 
+# Restore the line handlers that were previously saved
 def pop_log_terminator(terms: dict[logging.Handler, str]) -> None:
     for h in logging.getLogger('model').handlers:
         if h in terms:
@@ -51,22 +54,32 @@ if 'shm_names' not in globals():
     global shm_names
     shm_names: dict[str, tuple[shm.SharedMemory, bool, str]] = {}
 
+    # Cleanup function that removes all
     def cleanup():
         global shm_names
         for name, pair in shm_names.items():
+            # Try to release the resource
+            try:
+                pair[0].buf.release()
+                pair[0].close()
+            except Exception as e:
+                log.warning(f'Failed to close shared memory region {pair[0].name}\n{e}\nBacktrace:\n{pair[2]}')
+            
+            # If we should remove the resource, attempt to do so
             if pair[1]:
                 try:
-                    pair[0].buf.release()
-                    pair[0].close()
                     pair[0].unlink()
                 except Exception as e:
-                    log.warning(f'Failed to cleanup shared memory region {pair[0].name}\n{e}\nBacktrace:\n{pair[2]}')
+                    log.warning(f'Failed to unlink shared memory region {pair[0].name}\n{e}')
+                    
+    # Ensure the cleanup handler has been registered for atexit
     try:
         atexit.unregister(cleanup)
     except:
         pass
     atexit.register(cleanup)
 
+# Enum to define how to attach to shared memory
 class AttachFlag(IntEnum):
     DONT_ATTACH = 0
     ATTACH = 1
@@ -82,22 +95,22 @@ def create_shared_memory(size: int, name: str = None, attach: AttachFlag = Attac
     ret = shm.SharedMemory(name=name, create=(attach == AttachFlag.DONT_ATTACH), size=size)
     tmp = ""
     count: int = 0
+    # Generate stack frame information for debug tracking of shared memory regions
     for frame in inspect.stack():
         tmp += f"{count}: {frame.filename}.{frame.function}:{frame.lineno}\n"
         count += 1
+    # If a new block of memory was allocated print out the entire stack
     if attach == int(AttachFlag.DONT_ATTACH):
-        if name is None:
-            log.debug(f'Allocated {size} bytes with name {ret.name} for:\n{tmp}')
-        else:
-            tmpl = inspect.stack()[1]
-            log.debug(f'Allocated {size} bytes with name {ret.name} for {tmpl.filename}.{tmpl.function}')
+        log.debug(f'Allocated {size} bytes with name {ret.name} for:\n{tmp}')
+    # Else, print out the function that attached to the given memory block
+    else:
+        tmpl = inspect.stack()[1]
+        log.debug(f'Allocated {size} bytes with name {ret.name} for {tmpl.filename}.{tmpl.function}')
     shm_names.setdefault(ret.name, (ret, attach != AttachFlag.ATTACH, tmp))
     return ret.buf
 
 # Creates a property that stores the value in shared memory given by the memoryview object
 def create_shared_property(name: str, attr_type: type) -> property:
-    # if not issubclass(attr_type, ctypes._SimpleCData):
-    #     raise TypeError(f"Shared properties can only be represented as C-Types: {attr_type}")
     def getter(self):
         return attr_type(getattr(self, f'_{name}').value)
     def setter(self, value):
@@ -252,6 +265,7 @@ class SharedPathCache(PathCache):
             count += 1
         pop_log_terminator(tmp)
 
+    # Returns a key mappping value to load data from the backing memoryview without making a copy
     def keys(self) -> dict[PathPair, int]:
         return {k: 0 if v is None else len(v) for k, v in self.paths.items()}
 
@@ -282,7 +296,7 @@ class SharedPathCache(PathCache):
         return {str(k): None if v is None else [e.__json__() for e in v] for k, v in self.paths.items()}
 
     def __setitem__(self, pair, path):
-        raise RuntimeError()
+        raise RuntimeError(f"SharedPathCache is immutable")
 
 class SharedPlayer(Player):
     size: int = ctypes.sizeof(ctypes.c_uint32) + SharedPoint.size
@@ -348,8 +362,6 @@ class SharedArena(Arena):
         grid: np.ndarray = Arena._create_grid()
         self.grid: np.ndarray = np.ndarray(grid.shape, dtype=grid.dtype, buffer=self.buf[offset:offset+grid.nbytes])
         self.grid[:] = grid[:]
-        offset += self.grid.nbytes
-        # self.paths: SharedPathCache = SharedArena.shared_path_cache
     
     def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
         global log
@@ -373,6 +385,7 @@ class SharedArena(Arena):
         log.debug(f'Computed path from {start} to {end} as: {tmp}')
         return tmp
 
+# Helper function to copy the default value from a dataclass and convert the internal field into a shared varient
 def copy_default_params_to_shared(self, base_class: type):
     offset: int = 0
     for k, v in vars.asdict(base_class()).items():
@@ -409,7 +422,7 @@ class SharedConsoleDict(vars.ConsoleDict):
         self.buf = buf
         copy_default_params_to_shared(self, vars.DefaultConsoleDict)
         
-
+# Helper function to convert local storage properties of dataclasses into shared properties
 def attach_shared_property(base_class: type, shared_class: type):
     for _attr, _type in base_class.__annotations__.items():
         if issubclass(_type, bool):
