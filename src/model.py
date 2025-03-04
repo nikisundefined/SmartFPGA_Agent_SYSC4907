@@ -34,7 +34,7 @@ Player = simulation.Player
 Arena = simulation.Arena
 PathCache = simulation.PathCache
 performance = simulation.Performance([])
-player_info = simulation.PlayerInfo(0, 0, 0, 0)
+player_info = simulation.PlayerInfo(0, 0, 0)
 
 # NOTE: 
 #   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
@@ -208,8 +208,8 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if cvar.arena.on_goal():
         #push the performance here
         player_info.set_reward(cvar.reward)
-        player_info.set_position(cvar.arena.player.positions)
         performance.add_player_run_info(player_info)
+        log.info(performance)
         log.info("Agent reached the goal")
         cvar.arena.set_goal()
         log.debug(f"Player score is now: {cvar.arena.player.score}")
