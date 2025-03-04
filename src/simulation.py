@@ -56,8 +56,6 @@ class Performance:
         time = 0
         reward = 0
         action = 0
-        # currently bugged; trying to take each value and avg them over the total amount of them
-        # cannot access the player_info this way 
         for i in self.player_info:
             time += i.get_time()
             action += i.get_actions()
