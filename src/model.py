@@ -381,11 +381,11 @@ def create_model_fpga():
                 size_out=2,
                 label='Goal Location'
             )
-        learn_inhibit = nengo.Node(
-            output=inhibt,
-            size_out=cvar.error_dimensions,
-            label='Learning Inhibit Node'
-        )
+        # learn_inhibit = nengo.Node(
+        #     output=inhibt,
+        #     size_out=cvar.ensemble_neurons,
+        #     label='Learning Inhibit Node'
+        # )
 
         # Movement output
         mov_out = nengo.Node(
@@ -481,11 +481,11 @@ def create_model_fpga():
             post=fpga.error,
             label='Learning Connection'
         )
-        conn_inhibit = nengo.Connection(
-            pre=err,
-            post=err.neurons,
-            label='Error Inhibit Connection'
-        )
+        # conn_inhibit = nengo.Connection(
+        #     pre=learn_inhibit,
+        #     post=err.neurons,
+        #     label='Error Inhibit Connection'
+        # )
 
 def create_model():
     global model
