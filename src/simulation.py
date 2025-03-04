@@ -53,8 +53,6 @@ class Performance:
         self.player_info = player
     def add_player_run_info(self, player):
         self.player_info.append(player) 
-        # currently bugged; trying to take each value and avg them over the total amount of them
-        # cannot access the player_info this way 
         time = 0
         reward = 0
         action = 0
