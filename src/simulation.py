@@ -12,6 +12,74 @@ from enum import IntEnum
 
 log: logging.Logger = logging.getLogger('model.simulation')
 
+### player info class ###
+class PlayerInfo:
+    def __init__(self, actions, time, reward, postion):
+        self.actions = actions
+        self.time = time
+        self.reward = reward
+        self.postion = postion
+
+    def get_time(self):
+        return self.time
+    def set_time(self, time):
+        self.time = time
+    def get_actions(self):
+        return self.actions
+    def set_actions(self, actions):
+        self.actions = actions
+    def get_reward(self):
+        return self.reward
+    def set_reward(self, reward):
+        self.reward = reward
+    def get_position(self):
+        return self.postion
+    def set_position(self, position):
+        self.postion = position
+    def update_time(self):
+        self.time += 1
+    def update_actions(self):
+        self.actions += 1
+    def __str__(self):
+        return f"Player information; time : {self.time}, amount of steps : {self.actions}, current reward : {self.reward}, postions to get to goal : {self.postion}"
+### end of player info ###
+
+### performance metrics class ###
+class Performance:
+    def __init__(self, player_info):
+        self.player_info = player_info
+        self.avg_time = 0
+        self.avg_reward = 0
+        self.avg_actions = 0
+
+    def get_player_info(self):
+        return self.player_info
+    def set_player_info(self, player):
+        self.player_info = player
+    def add_player_run_info(self, player):
+        self.player_info.append(player) 
+        x = 0
+        time = 0
+        reward = 0
+        action = 0
+        # currently bugged; trying to take each value and avg them over the total amount of them
+        # cannot access the player_info this way 
+        for i in self.player_info:
+            for j in self.player_info[i]:
+                if x % 4 == 0:
+                    time  += self.player_info[i][j]
+                if x % 4 == 1:
+                    action += self.player_info[i][j]
+                if x % 4 == 2: 
+                    reward += self.player_info[i][j]
+                x += 1
+        self.avg_time = time / (x / 4)
+        self.avg_actions = action / (x / 4)
+        self.avg_reward = reward / (x / 4)
+    def __str__(self):
+        return f"Performance metrics; time to goal:{self.avg_time}, moves: {self.avg_actions}, reward: {self.avg_reward}"
+
+### end of performance metric ###
 class Point:
 
     # Convert a 4D numpy array into a point represented as: [-Y, X, Y, -X]
