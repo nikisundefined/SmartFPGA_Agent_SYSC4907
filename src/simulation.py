@@ -19,15 +19,21 @@ class PlayerInfo:
         self.time = time
         self.reward = reward
 
-    def get_time(self):
+    def copy(self, actions, time, reward) -> 'PlayerInfo':
+        temp = PlayerInfo(actions, time, reward)
+        temp.actions = self.actions
+        temp.time = self.time
+        temp.reward = self.reward
+        return temp
+    def get_time(self) -> 'int':
         return self.time
     def set_time(self, time):
         self.time = time
-    def get_actions(self):
+    def get_actions(self) -> 'int':
         return self.actions
     def set_actions(self, actions):
         self.actions = actions
-    def get_reward(self):
+    def get_reward(self) -> 'int':
         return self.reward
     def set_reward(self, reward):
         self.reward = reward
@@ -35,7 +41,7 @@ class PlayerInfo:
         self.time += 1
     def update_actions(self):
         self.actions += 1
-    def __str__(self):
+    def __str__(self) -> 'str':
         return f"Player information; time : {self.time}, amount of steps : {self.actions}, current reward : {self.reward}"
 ### end of player info ###
 
@@ -47,7 +53,7 @@ class Performance:
         self.avg_reward = 0
         self.avg_actions = 0
 
-    def get_player_info(self):
+    def get_player_info(self) -> 'PlayerInfo':
         return self.player_info
     def set_player_info(self, player):
         self.player_info = player

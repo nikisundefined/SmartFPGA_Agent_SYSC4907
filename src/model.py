@@ -123,6 +123,8 @@ if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exist
     log.info(f"Loaded {len(shared.SharedArena.shared_path_cache)} paths from cache")
 
 ### Input Node Functions ###
+## functions currently being used:
+## goal location and player location
 
 # Returns the current location of the player as a 2D Point
 def player_location(t: float, cvar: AttrDict = cvar) -> np.ndarray:
@@ -208,7 +210,9 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if cvar.arena.on_goal():
         #push the performance here
         player_info.set_reward(cvar.reward)
-        performance.add_player_run_info(player_info)
+        performance.add_player_run_info(player_info.copy(player_info.get_actions, player_info.get_time, player_info.get_reward,))
+        player_info.set_actions(0)
+        player_info.set_actions(0)
         log.info(performance)
         log.info("Agent reached the goal")
         cvar.arena.set_goal()
