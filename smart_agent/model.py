@@ -14,7 +14,7 @@ import nengo.solvers
 import nengo_gui
 import nengo_fpga.networks
 import numpy as np
-import dearpygui.dearpygui as dpg
+import dearpygui.dearpygui as dpg 
 
 import smart_agent
 import smart_agent.vars as vars
@@ -344,10 +344,10 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
     return tmp.clip(0, 1)
 
-def inhibt(t: float, cvar: AttrDict = cvar) -> np.ndarray:
+def inhibit(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     if cvar.learning:
-        return np.zeros((cvar.ensemble_neurons,cvar.error_dimensions))
-    return -1000*np.ones((cvar.ensemble_neurons, cvar.error_dimensions))
+        return np.zeros((cvar.ensemble_neurons,), dtype=cvar.dtype)
+    return -1000*np.ones((cvar.ensemble_neurons,), dtype=cvar.dtype)
 
 def create_model_fpga():
     global model
@@ -391,11 +391,11 @@ def create_model_fpga():
                 size_out=2,
                 label='Goal Location'
             )
-        # learn_inhibit = nengo.Node(
-        #     output=inhibt,
-        #     size_out=cvar.ensemble_neurons,
-        #     label='Learning Inhibit Node'
-        # )
+        learn_inhibit = nengo.Node(
+            output=inhibit,
+            size_out=cvar.ensemble_neurons,
+            label='Learning Inhibit Node'
+        )
 
         # Movement output
         mov_out = nengo.Node(
@@ -496,114 +496,10 @@ def create_model_fpga():
             post=fpga.error,
             label='Learning Connection'
         )
-        # conn_inhibit = nengo.Connection(
-        #     pre=learn_inhibit,
-        #     post=err.neurons,
-        #     label='Error Inhibit Connection'
-        # )
-
-def create_model():
-    global model
-    # Global model definition for use with NengoGUI
-    model = nengo.Network(label='pacman')
-    with model:
-        bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
-        thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
-
-        # Nodes (interaction with simulation)
-        # Detection distance input
-        dist_in = nengo.Node(
-            output=detection,
-            size_out=cvar.input_dimensions,
-            label='Distance Input Node'
-        )
-        # Movement output
-        mov_out = nengo.Node(
-            output=move,
-            size_in=cvar.output_dimensions,
-            label='Movement Output'
-        )
-        # Error computation Input/Output
-        err_tra = nengo.Node(
-            output=error,
-            size_in=cvar.error_dimensions,
-            size_out=cvar.output_dimensions,
-            label='Error Compute',
-        )
-        nreward = nengo.Node(
-            output=lambda x: cvar.reward,
-            size_out=1,
-            label='Reward'
-        )
-
-        # Ensembles
-        pre = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.input_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Pre',
-        )
-        post = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Post',
-        )
-        err = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Error',
-        )
-
-        # Processing Connections
-        conn_dist_in = nengo.Connection(
-            pre=dist_in,
-            post=pre,
-            label='Distance Input Connection',
-        )
-        # conn_inp = nengo.Connection()
-        conn_pre_post = nengo.Connection(
-            pre=pre,
-            post=post,
-            synapse=cvar.connection_synapse,
-            learning_rule_type=cvar.learning_rule_type,
-            solver=cvar.solver_type,
-            label='Pre -> Post Connection',
-        )
-
-        # Output Filtering Connections
-        conn_post_bg = nengo.Connection(
-            pre=post,
-            post=bg.input,
-            label='Post -> BG Connection'
-        )
-        conn_bg_thal = nengo.Connection(
-            pre=bg.output,
-            post=thal.input,
-            label='BG -> Thal Connection'
-        )
-        conn_thal_out = nengo.Connection(
-            pre=thal.output,
-            post=mov_out,
-            label='Action Output Connection'
-        )
-
-        # Learning Connections
-        conn_err_tra = nengo.Connection(
-            pre=err_tra,
-            post=err,
-            label='Error Transformation Connection'
-        )
-        conn_post_err = nengo.Connection(
-            pre=post,
-            post=err_tra,
-            label='Post Feedback'
-        )
-        conn_learn = nengo.Connection(
-            pre=err,
-            post=conn_pre_post.learning_rule,
-            label='Learning Connection'
+        conn_inhibit = nengo.Connection(
+            pre=learn_inhibit,
+            post=err.neurons,
+            label='Error Inhibit Connection'
         )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
@@ -664,8 +560,6 @@ if __name__ == '__main__':
             # Ensure all references to shared memory are removed before exiting
             del cvar
             del gvar
-            del vars.cvar
-            del vars.gvar
             del shared.SharedArena.shared_path_cache
             # Ensure the script exits after this runs
             exit(0)
@@ -703,23 +597,30 @@ if '__page__' in locals():
     model: nengo.Network = None
     create_model_fpga()
 
+    # Hook that is exectuted every time the simulation is started from the NengoGUI
     def on_start(sim: nengo.Simulator):
         gvar.seed = sim.seed
         gvar.start_time = time.time()
         gvar.run_timer = True
 
+    # Hook that is executed every time the simulation is paused
     def on_pause(sim: nengo.Simulator):
         gvar.end_time = time.time()
         gvar.offset_start_time = time.time()
         gvar.run_timer = False
-    
+
+    # Hook that executes when the simulation is resumed
     def on_continue(sim: nengo.Simulator):
         gvar.offset_time += time.time() - gvar.offset_start_time
         gvar.run_timer = True
 
+    # Hook that is run on every step the model computes (dt = 0.01s ~= 100 steps per sim second)
     def on_step(sim: nengo.Simulator):
         if sim is not None:
             gvar.sim_time = sim.time
-    
+            if sim.time == 60.0: # Stop learning at 60s in simulation time
+                cvar.learning = False
+
+    # Hook that is executed when the simulator (Browser window) is closed
     def on_close(sim: nengo.Simulator):
         log.info(f'Finished simulation after running {sim.n_steps} steps')
