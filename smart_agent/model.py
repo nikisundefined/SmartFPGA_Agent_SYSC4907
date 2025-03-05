@@ -28,6 +28,8 @@ Point = simulation.Point
 Player = simulation.Player
 Arena = simulation.Arena
 PathCache = simulation.PathCache
+performance = simulation.Performance([])
+player_info = simulation.PlayerInfo(0, 0, 0)
 
 # NOTE: 
 #   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
@@ -54,10 +56,13 @@ PathCache = simulation.PathCache
 #   Check if the model is actually learning or just adapting based on the error
 #       - Check this with performance characteristics
 #   Add more tracking in player class (Steps to reach goal, Reward value, Time taken)
-#   Add performance characteristics:
-#       - Time per goal
-#       - Movements per goal
-#       - Reward Value at goal
+#       - working on
+#   Add performance characteristics: 
+#       - Time per goal (50%)
+#           - change where it is updated to only update on whole number
+#       - Movements per goal (50%) 
+#           - change where it is updated so its only updated on move
+#       - Reward Value at goal (completed)
 #   Generate list of hyperparameters for optimization phase
 #       - Learning Rate
 #       - Error Baseline
@@ -114,6 +119,8 @@ if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exist
     log.info(f"Loaded {len(shared.SharedArena.shared_path_cache)} paths from cache")
 
 ### Input Node Functions ###
+## functions currently being used:
+## goal location and player location
 
 # Returns the current location of the player as a 2D Point
 def player_location(t: float, cvar: AttrDict = cvar) -> np.ndarray:
@@ -164,7 +171,9 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if not math.isclose(t, int(t)):
         return
     log.info(f"Move at {round(t, 2)} ======================================>")
-
+    #update here
+    player_info.update_actions()
+    player_info.update_time()
     # Determine the action to perform (Direction to move)
     index = int(np.argmax(x))
     if math.isclose(x[index],0,abs_tol=cvar.movement_threshold): # Check if the input value was larger than the threshold
@@ -195,6 +204,12 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 
     # Update the goal location when the agent reaches the goal
     if cvar.arena.on_goal():
+        #push the performance here
+        player_info.set_reward(cvar.reward)
+        performance.add_player_run_info(player_info.copy(player_info.get_actions, player_info.get_time, player_info.get_reward,))
+        player_info.set_actions(0)
+        player_info.set_actions(0)
+        log.info(performance)
         log.info("Agent reached the goal")
         cvar.arena.set_goal()
         log.debug(f"Player score is now: {cvar.arena.player.score}")
