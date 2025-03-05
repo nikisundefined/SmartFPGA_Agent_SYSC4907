@@ -62,10 +62,10 @@ class Performance:
         time = 0
         reward = 0
         action = 0
-        for i in self.player_info:
-            time += i.get_time()
-            action += i.get_actions()
-            reward += i.get_reward()
+        for player in self.player_info:
+            time += player.get_time()
+            action += player.get_actions()
+            reward += player.get_reward()
 
         self.avg_time = time / len(self.player_info)
         self.avg_actions = action / len(self.player_info)
