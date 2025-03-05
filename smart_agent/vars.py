@@ -5,21 +5,24 @@ import logging
 import json
 import numpy as np
 import pathlib
-import simulation
+import smart_agent.simulation as simulation
 from dataclasses import dataclass, asdict
+import nengopy.neurons as nengopy
 
 Arena = simulation.Arena
 Direction = simulation.Direction
 
+log: logging.Logger = logging.getLogger('smart_agent.vars')
+
 # Default json encoder for custom object serialization
 class JsonEncoder(json.JSONEncoder):
-    def __init__():
-        super()
-    
+    def __init__(self):
+        super().__init__()
+
     def default(self, o):
         try:
             return o.__json__()
-        except:
+        except AttributeError:
             pass
         return super().default(o)
 
@@ -32,7 +35,7 @@ def create_property(name: str, attr_type: type) -> property:
         setattr(self, f"_{name}", value)
     
     def deleter(self) -> None:
-        delattr(f"_{name}")
+        delattr(self, f"_{name}")
 
     return property(getter, setter, deleter, f"Property for {name}: {attr_type}")
 
@@ -55,7 +58,7 @@ class DefaultConsoleDict:
     # The adaptive factor used with the Adaptive LIF neuron type
     tau_n: float = 0.01
     # Neuron type used in all ensembles
-    neuron_type: nengo.neurons.NeuronType = nengo.neurons.SpikingRectifiedLinear()
+    neuron_type: nengo.neurons.NeuronType = nengopy.RectifiedLinear()
     # Solver type used for learning connections
     solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True)
     # Learning rule used for learning connections
@@ -144,40 +147,3 @@ class GUIDict:
 # Load all properties from the defaults for easy access
 for attr, type in DefaultGUIDict.__annotations__.items():
         setattr(GUIDict, attr, create_property(attr, type))
-
-log: logging.Logger = logging.getLogger('model.vars')
-
-if __name__ != '__main__':
-    ### Global initialization
-    import shared
-    _log: logging.Logger = logging.getLogger('vars')
-
-    if 'svar' not in globals():
-        svar: SharedDict = SharedDict()
-        _log.debug('Initialized shared variables')
-
-    # If console vars are not loaded, attempt to load them from shared memory
-    if svar.cvars_name not in globals():
-        _log.debug('cvar not found, attempting to load from shared memory')
-        tmp: memoryview = None
-        try:
-            tmp = shared.create_shared_memory(shared.SharedConsoleDict.size, svar.cvars_name, shared.AttachFlag.ATTACH)
-            _log.debug(f'Loaded Console Variables from shared memory with name: {svar.cvars_name}')
-        except Exception as e:
-            _log.warning('Could not load Console Variables from shared memory, creating new instance')
-            tmp = shared.create_shared_memory(shared.SharedConsoleDict.size, svar.cvars_name)
-        cvar: ConsoleDict = shared.SharedConsoleDict(tmp)
-        log.setLevel(cvar.log_level)
-        
-    # If GUI vars are not loaded, attempt to load them from shared memory
-    if svar.gvars_name not in globals():
-        _log.debug('gvar not found, attempting to load from shared memory')
-        tmp: memoryview = None
-        try:
-            tmp = shared.create_shared_memory(shared.SharedGUIDict.size, svar.gvars_name, shared.AttachFlag.ATTACH)
-            _log.debug(f'Loaded GUI Variables from shared memory with name: {svar.gvars_name}')
-        except:
-            _log.warning('Could not load GUI Variables from shared memory, creating new instance')
-            tmp = shared.create_shared_memory(shared.SharedGUIDict.size, svar.gvars_name)
-        gvar: GUIDict = shared.SharedGUIDict(tmp)
-        gvar.arena = cvar.arena

@@ -6,7 +6,7 @@ import atexit
 import ctypes
 import logging
 import inspect
-import simulation
+import smart_agent.simulation as simulation
 from enum import IntEnum
 
 # Import class names into namespace, needed due to cyclic imports
@@ -31,13 +31,13 @@ PathPair = simulation.PathPair
 #   bool -> uint8
 #   str -> uint8[255]
 
-import vars
-log: logging.Logger = logging.getLogger('model.shared')
+import smart_agent.vars as vars
+log: logging.Logger = logging.getLogger('smart_agent.shared')
 
 # Store the line terminators for all handlers to allow printing on the same line
 def push_log_terminiator() -> dict[logging.Handler, str]:
     ret: dict[logging.Handler, str] = {}
-    for h in logging.getLogger('model').handlers:
+    for h in logging.getLogger('smart_agent').handlers:
         if isinstance(h, logging.StreamHandler):
             ret.setdefault(h, h.terminator)
             h.terminator = ""
@@ -45,7 +45,7 @@ def push_log_terminiator() -> dict[logging.Handler, str]:
 
 # Restore the line handlers that were previously saved
 def pop_log_terminator(terms: dict[logging.Handler, str]) -> None:
-    for h in logging.getLogger('model').handlers:
+    for h in logging.getLogger('smart_agent').handlers:
         if h in terms:
             h.terminator = terms[h]
 

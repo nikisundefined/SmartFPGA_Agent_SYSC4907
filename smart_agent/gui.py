@@ -1,11 +1,12 @@
-import simulation
+import smart_agent.simulation as simulation
 import dearpygui.dearpygui as dpg
 import time
 import numpy as np
 import logging
-import vars
+import smart_agent.vars as vars
+import smart_agent
 
-log: logging.Logger = logging.getLogger('model.gui')
+log: logging.Logger = logging.getLogger('smart_agent.gui')
 
 def create_texture(n: int, m: int) -> list[float]:
     texture_data: list[float] = []
@@ -26,7 +27,7 @@ def fill_tile(grid: np.ndarray, x: int, y: int, color: list[float], block_size: 
 # Updates the grid text with the current state of the arena
 def update_grid(arena: simulation.Arena | None = None, block_size: int = 10, tag: str | int = 'Environment'):
     if arena is None:
-        arena = vars.gvar.arena
+        arena = smart_agent.gvar.arena
     texture_data: list[float] = []
     PATH_COLOR: list[float] = [255 / 255, 0, 0, 255 / 255] # Color of the path
     _map: dict[int, list[float]] = {
@@ -65,7 +66,7 @@ def move(sender, app_data, user_data: simulation.Direction):
 def create_gui(arena: simulation.Arena | None = None, block_size: int = 10):
     # If the arena is not given load attempt to load it from shared memory
     if arena is None:
-        arena = vars.gvar.arena
+        arena = smart_agent.gvar.arena
     rows: int = arena.n
     columns: int = arena.m
     # Compute the viewport size with extra padding
@@ -93,7 +94,7 @@ def create_gui(arena: simulation.Arena | None = None, block_size: int = 10):
         dpg.add_image("Environment", width=texture_width, height=texture_height, pos=[hori_offset, vert_offset])
         dpg.add_text(f'Score: {arena.player.score}', tag='score')
         dpg.add_text('Time: 0.0', tag='time')
-        dpg.add_text(f"{vars.gvar.seed}", tag='seed')
+        dpg.add_text(f"{smart_agent.gvar.seed}", tag='seed')
     
     dpg.add_value_registry(tag='value_registry')
     dpg.add_float_value(tag='timer', parent='value_registry')
@@ -111,8 +112,8 @@ def display_gui():
     dpg.set_primary_window("Pacman", True)
 
 def update_text():
-    cvar = vars.cvar
-    gvar = vars.gvar
+    cvar = smart_agent.cvar
+    gvar = smart_agent.gvar
 
     # Always update the score text box and reposition accordingly
     dpg.set_value('score', f'Score: {cvar.arena.player.score}')

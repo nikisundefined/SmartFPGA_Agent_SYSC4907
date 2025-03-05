@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-
-
 import sys
 import math
 import time
 import logging
 import threading
-import multiprocessing.shared_memory
-log = logging.getLogger('model')
-handle = logging.StreamHandler(sys.stdout)
-handle.setFormatter(logging.Formatter(f'{threading.current_thread().name}[{{name}}] | {{levelname}} -> {{message}}', style='{'))
-log.addHandler(handle)
+
+log = logging.getLogger('smart_agent.model')
 
 import nengo
 import nengo.learning_rules
@@ -20,12 +15,12 @@ import nengo_gui
 import nengo_fpga.networks
 import numpy as np
 import dearpygui.dearpygui as dpg
-import pause
 
-import vars
-import shared
-import simulation
-import gui
+import smart_agent
+import smart_agent.vars as vars
+import smart_agent.shared as shared
+import smart_agent.simulation as simulation
+import smart_agent.gui as gui
 
 AttrDict = vars.ConsoleDict
 Direction = simulation.Direction
@@ -47,10 +42,9 @@ PathCache = simulation.PathCache
 
 # TODO:
 # Short Term:
+#   Reduce memory usage
+#   Finish implementation of NeuronTypes in C++
 #   Investigate large pause when t ~= int(t)
-#   Implement binary key import/export
-#   Add Comments to all new code
-#   Add many more logs to all functions
 #   Determine the source of the memory leak at shutdown
 # Long Term:
 #   Find better inputs
@@ -72,8 +66,8 @@ PathCache = simulation.PathCache
 
 
 # Setup the variables for the model
-cvar = vars.cvar
-gvar = vars.gvar
+cvar = smart_agent.cvar
+gvar = smart_agent.gvar
 log.setLevel(cvar.log_level)
 
 # If the shared cache is not loaded and the cache file exists, attempt to load it
@@ -88,14 +82,16 @@ if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exist
             log.warning(f'Shared memory region for path cache is incorrect size: {tmp.nbytes} < {shared.SharedPathCache.size}')
             tmp.release()
             # Not the right size, remove it and reallocate
-            elem: multiprocessing.shared_memory.SharedMemory = None
-            for name in shared.shm_names:
-                if name.name == 'path_cache':
-                    name.close()
-                    name.unlink()
+            elem: str | None = None
+            for name, value in shared.shm_names.items():
+                if value[0].name == 'path_cache':
+                    value[0].close()
+                    value[0].unlink()
                     elem = name
                     break
-            shared.shm_names.remove(elem)
+            if elem is None:
+                raise RuntimeError(f'Failed to find path_cache in shared memory')
+            del shared.shm_names[elem]
             # Raise error to execute code related to loading from file
             raise BufferError()
         attached = True
@@ -146,7 +142,7 @@ def goal_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
 
 # Returns the distance to the goal as the length of the path calculated using the A* algorithm
 def goal_path_distance(t: float, cvar: AttrDict = cvar) -> int:
-    return len(cvar.arena.distance()) / 30.0
+    return len(cvar.arena.distance()) / 44.0
 
 def goal_best_direction(t: float, cvar: AttrDict = cvar) -> float:
     return (int(cvar.arena.best_direction()) + 1) / 5.0
@@ -219,7 +215,6 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 # Calculates the error of the model inputs to outputs based on:
 def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     BASELINE_ERROR: float = 0.8 # The maximum value for the error
-    ERROR_CURVE: float = 2.0
     
     def err_calc(best_direction: Direction, x: np.ndarray = x, cvar: AttrDict = cvar):
         # Error is the baseline value scaled by the inverse of the reward in the best direction
@@ -294,7 +289,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         else:
             # Increment the counter
             cvar.moved_away_from_goal += 1
-            # If the last 2 movements mvoed away from the goal
+            # If the last 2 movements moved away from the goal
             if cvar.moved_away_from_goal == 2:
                 # Punish it more
                 reward -= VERY_AWAY_FROM_GOAL_PENALTY
@@ -349,27 +344,27 @@ def create_model_fpga():
 
         # Nodes (interaction with simulation)
         # Detection distance input
+        dist_in = nengo.Node(
+            output=detection,
+            size_out=cvar.input_dimensions,
+            label='Distance Input Node'
+        )
         if not cvar.alt_input:
-            dist_in = nengo.Node(
-                output=detection,
-                size_out=cvar.input_dimensions,
-                label='Distance Input Node'
+            g_dist = nengo.Node(
+                output=goal_path_distance,
+                size_out=1,
+                label='Goal Path Distance'
             )
-        # g_dist = nengo.Node(
-        #     output=goal_path_distance,
-        #     size_out=1,
-        #     label='Goal Path Distance'
-        # )
-        # best_dir = nengo.Node(
-        #     output=goal_best_direction,
-        #     size_out=1,
-        #     label='Goal Best Direction'
-        # )
-        # g_pnt = nengo.Node(
-        #     output=goal_point_distance,
-        #     size_out=2,
-        #     label='Goal Point Distance'
-        # )
+            best_dir = nengo.Node(
+                output=goal_best_direction,
+                size_out=1,
+                label='Goal Best Direction'
+            )
+            g_pnt = nengo.Node(
+                output=goal_point_distance,
+                size_out=2,
+                label='Goal Point Distance'
+            )
         else:
             p_loc = nengo.Node(
                 output=player_location,
@@ -445,6 +440,11 @@ def create_model_fpga():
                 post=fpga.input[2:],
                 transform=np.ones(2, dtype=cvar.dtype) / 23.0,
                 label='Goal Location Input'
+            )
+            conn_dist_in = nengo.Connection(
+                pre=dist_in,
+                post=fpga.input,
+                label='Distance Input Connection'
             )
 
 
@@ -612,7 +612,7 @@ def main():
             gui.update_grid(cvar.arena) # Update the arena representation inside the GUI
             dpg.render_dearpygui_frame() # Render the updated frame to the GUI
             expected_end_time: float = start_time + target_frame_time # Compute how long to wait for the next frame
-            pause.until(expected_end_time) # Wait until its time to render the next frame
+            time.sleep(max(expected_end_time - time.time(), 0)) # Wait until its time to render the next frame
         log.debug(f'Simulator ran: {sim.n_steps} steps')
     dpg.destroy_context()
 
@@ -669,11 +669,12 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as e:
-        log.critical(f"ERROR: {e}", exc_info=1)
+        log.critical(f"ERROR: {e}", exc_info=e)
         exit(1)
 
 if '__page__' in locals():
-    logging.root.handlers = [handle]
+    logging.root.handlers = []
+    # logging.root.handlers = [smart_agent.handle]
     # Check if the local gui is running and set flag
     for t in threading.enumerate():
         if t.name == 'GUI':
@@ -702,7 +703,8 @@ if '__page__' in locals():
         gvar.run_timer = True
 
     def on_step(sim: nengo.Simulator):
-        gvar.sim_time = sim.time
+        if sim is not None:
+            gvar.sim_time = sim.time
     
     def on_close(sim: nengo.Simulator):
         log.info(f'Finished simulation after running {sim.n_steps} steps')

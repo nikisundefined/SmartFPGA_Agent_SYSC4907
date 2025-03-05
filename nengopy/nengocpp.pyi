@@ -1,0 +1,23 @@
+"""
+nengocpp.py
+"""
+from __future__ import annotations
+import numpy
+import typing
+__all__ = ['RectifiedLinearImpl', 'SpikingRectifiedLinearImpl']
+class RectifiedLinearImpl:
+    def __init__(self) -> None:
+        ...
+    def gain_bias(self, max_rates: numpy.ndarray, intercepts: numpy.ndarray) -> tuple:
+        ...
+    def max_rates_intercepts(self, gain: numpy.ndarray, bias: numpy.ndarray) -> tuple:
+        ...
+    def step(self, dt: float, J: numpy.ndarray, output: numpy.ndarray) -> None:
+        ...
+class SpikingRectifiedLinearImpl:
+    def __init__(self) -> None:
+        ...
+    def rates(self, x: numpy.ndarray, gain: numpy.ndarray, bias: numpy.ndarray) -> numpy.ndarray:
+        ...
+    def step(self, dt: float, J: numpy.ndarray, output: numpy.ndarray, voltage: numpy.ndarray) -> None:
+        ...

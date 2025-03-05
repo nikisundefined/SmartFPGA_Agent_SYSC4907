@@ -10,7 +10,7 @@ import json
 from typing import Union
 from enum import IntEnum
 
-log: logging.Logger = logging.getLogger('model.simulation')
+log: logging.Logger = logging.getLogger('smart_agent.simulation')
 
 class Point:
 
