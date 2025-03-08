@@ -69,6 +69,7 @@ player_info = simulation.PlayerInfo(0, 0, 0)
 #       - Movements per goal (50%) 
 #           - change where it is updated so its only updated on move
 #       - Reward Value at goal (completed)
+#       - amount of goal reached in x seconds
 #   Generate list of hyperparameters for optimization phase
 #       - Learning Rate
 #       - Error Baseline
@@ -176,7 +177,6 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         return
     log.info(f"Move at {round(t, 2)} ======================================>")
     #update here
-    player_info.update_actions()
     player_info.update_time()
     # Determine the action to perform (Direction to move)
     index = int(np.argmax(x))
@@ -192,8 +192,10 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if tmp == cvar.arena.player:
         cvar.last_action == Direction.NONE # None if the player did not move
     elif abs(delta_dist.x) == cvar.arena.n - 1:
+        player_info.update_actions()
         cvar.last_action = Point(np.sign(delta_dist.x), 0).asdirection() # Special case to handle wrapping
     else:
+        player_info.update_actions()
         cvar.last_action = delta_dist.asdirection() # Generic form convert change in location to a direction
 
     # Check if the player has stopped moving and log it
@@ -212,7 +214,7 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         player_info.set_reward(cvar.reward)
         performance.add_player_run_info(player_info.copy(player_info.get_actions, player_info.get_time, player_info.get_reward,))
         player_info.set_actions(0)
-        player_info.set_actions(0)
+        player_info.set_time(0)
         log.info(performance)
         log.info("Agent reached the goal")
         cvar.arena.set_goal()
