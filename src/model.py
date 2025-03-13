@@ -371,13 +371,13 @@ def create_model_fpga():
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.input_dimensions,
             neuron_type = cvar.neuron_type,
-            label = 'Input Pac'
+            label = 'Pac Pre'
         )
         pac_post = nengo.Ensemble(
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.output_dimensions,
             neuron_type = cvar.neuron_type,
-            label = 'Output Pac'
+            label = 'Pac Post'
         )
         # Nodes (interaction with simulation)
         # Detection distance input
@@ -459,7 +459,7 @@ def create_model_fpga():
         )
 
         # Processing Connections
-        
+        '''
         if not cvar.alt_input:
             conn_dist_in = nengo.Connection(
                 pre=dist_in,
@@ -478,30 +478,32 @@ def create_model_fpga():
                 post=fpga.input[2:],
                 transform=np.ones(2, dtype=cvar.dtype) / 23.0,
                 label='Goal Location Input'
-            )
+            )'''
 
 
-        '''# connections for pre and post ensembles
+        # connections for pre and post ensembles
         conn_pac_pre_p = nengo.Connection(
             pre = p_loc,
             post = pac_pre[:2],
+            transform=np.ones(2, dtype=cvar.dtype) / 23.0,
             label = 'player location input connection' 
         )
         conn_pac_pre_g = nengo.Connection(
             pre = g_loc,
             post = pac_pre[2:],
+            transform=np.ones(2, dtype=cvar.dtype) / 23.0,
             label = "goal location input"
-        )'''
+        )
         conn_pac_out_bg = nengo.Connection(
             pre = pac_post,
             post = bg.input,
             label = 'out -> BG connection'
         )
-        conn_pac_pre_bg = nengo.Connection(
-            pre = fpga.input,
-            post = pac_pre,
-            label = 'fpga input -> pre'
-        )
+        #conn_pac_pre_bg = nengo.Connection(
+        #    pre = fpga.input,
+        #    post = pac_pre,
+        #    label = 'fpga input -> pre'
+        #)
         conn_pac_in_out = nengo.Connection(
             pre = pac_pre,
             post = pac_post,
