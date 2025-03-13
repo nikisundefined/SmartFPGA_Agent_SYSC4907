@@ -7,6 +7,8 @@ import time
 import logging
 import threading
 import multiprocessing.shared_memory
+
+import nengo.connection
 log = logging.getLogger('model')
 handle = logging.StreamHandler(sys.stdout)
 handle.setFormatter(logging.Formatter(f'{threading.current_thread().name}[{{name}}] | {{levelname}} -> {{message}}', style='{'))
@@ -364,6 +366,19 @@ def create_model_fpga():
         bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
         thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
 
+        # pre/post ensembles
+        pac_pre = nengo.Ensemble(
+            n_neurons = cvar.ensemble_neurons,
+            dimensions = cvar.input_dimensions,
+            neuron_type = cvar.neuron_type,
+            label = 'Input Pac'
+        )
+        pac_post = nengo.Ensemble(
+            n_neurons = cvar.ensemble_neurons,
+            dimensions = cvar.output_dimensions,
+            neuron_type = cvar.neuron_type,
+            label = 'Output Pac'
+        )
         # Nodes (interaction with simulation)
         # Detection distance input
         if not cvar.alt_input:
@@ -444,6 +459,7 @@ def create_model_fpga():
         )
 
         # Processing Connections
+        
         if not cvar.alt_input:
             conn_dist_in = nengo.Connection(
                 pre=dist_in,
@@ -465,12 +481,42 @@ def create_model_fpga():
             )
 
 
-        # Output Filtering Connections
-        conn_post_bg = nengo.Connection(
-            pre=fpga.output,
-            post=bg.input,
-            label='Post -> BG Connection'
+        '''# connections for pre and post ensembles
+        conn_pac_pre_p = nengo.Connection(
+            pre = p_loc,
+            post = pac_pre[:2],
+            label = 'player location input connection' 
         )
+        conn_pac_pre_g = nengo.Connection(
+            pre = g_loc,
+            post = pac_pre[2:],
+            label = "goal location input"
+        )'''
+        conn_pac_out_bg = nengo.Connection(
+            pre = pac_post,
+            post = bg.input,
+            label = 'out -> BG connection'
+        )
+        conn_pac_pre_bg = nengo.Connection(
+            pre = fpga.input,
+            post = pac_pre,
+            label = 'fpga input -> pre'
+        )
+        conn_pac_in_out = nengo.Connection(
+            pre = pac_pre,
+            post = pac_post,
+            label = 'pre -> post'
+        )
+        conn_pac_in_out.learning_rule_type = nengo.PES()
+        nengo.Connection(err, conn_pac_in_out.learning_rule)
+
+
+        # Output Filtering Connections
+        #conn_post_bg = nengo.Connection(
+        #    pre=fpga.output,
+        #    post=pac_post,
+        #    label='Post -> BG Connection'
+        #)
         conn_bg_thal = nengo.Connection(
             pre=bg.output,
             post=thal.input,
@@ -493,11 +539,12 @@ def create_model_fpga():
             post=err_tra,
             label='Post Feedback'
         )
-        conn_learn = nengo.Connection(
-            pre=err,
-            post=fpga.error,
-            label='Learning Connection'
-        )
+        
+        #conn_learn = nengo.Connection(
+        #    pre=err,
+        #    post=fpga.error,
+        #    label='Learning Connection'
+        #)
         # conn_inhibit = nengo.Connection(
         #     pre=learn_inhibit,
         #     post=err.neurons,
