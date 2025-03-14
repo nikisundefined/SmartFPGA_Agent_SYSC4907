@@ -153,7 +153,7 @@ def goal_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
 def goal_path_distance(t: float, cvar: AttrDict = cvar) -> int:
     return len(cvar.arena.distance()) / 44.0
 
-def goal_best_direction(t: float, cvar: AttrDict = cvar) -> float:
+def goal_best_direction(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     tmp = np.array([0, 0, 0, 0], dtype=cvar.dtype)
     tmp[int(cvar.arena.best_direction())] = 0.5
     return tmp
@@ -373,6 +373,7 @@ def create_model_fpga():
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.output_dimensions,
             neuron_type = cvar.neuron_type,
+            noise=nengo.processes.WhiteNoise(),
             label = 'Pac Post'
         )
         dist_in = nengo.Node(
@@ -393,11 +394,11 @@ def create_model_fpga():
         #     size_out=1,
         #     label='Goal Path Distance'
         # )
-        # best_dir = nengo.Node(
-        #     output=goal_best_direction,
-        #     size_out=1,
-        #     label='Goal Best Direction'
-        # )
+        best_dir = nengo.Node(
+            output=goal_best_direction,
+            size_out=cvar.input_dimensions,
+            label='Goal Best Direction'
+        )
         # g_pnt = nengo.Node(
         #     output=goal_point_distance,
         #     size_out=2,
@@ -489,6 +490,11 @@ def create_model_fpga():
             pre=dist_in,
             post=pac_pre,
             label='Distance Input Connection',
+        )
+        conn_best_in = nengo.Connection(
+            pre=best_dir,
+            post=pac_pre,
+            label='Best Direction Connection'
         )
         # conn_pac_pre_p = nengo.Connection(
         #     pre = p_loc,
