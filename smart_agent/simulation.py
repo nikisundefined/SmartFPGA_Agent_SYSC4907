@@ -70,8 +70,10 @@ class Performance:
         self.avg_time = time / len(self.player_info)
         self.avg_actions = action / len(self.player_info)
         self.avg_reward = reward / len(self.player_info)
+        self.goal_count = len(self.player_info)
+
     def __str__(self):
-        return f"Performance metrics; time to goal:{self.avg_time}, moves: {self.avg_actions}, reward: {self.avg_reward}"
+        return f"Performance metrics; average time to goal:{self.avg_time}, average moves: {self.avg_actions}, average reward: {self.avg_reward}, Goals reached: {self.goal_count}"
 
 ### end of performance metric ###
 class Point:

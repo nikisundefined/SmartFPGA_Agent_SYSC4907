@@ -14,7 +14,7 @@ import nengo.solvers
 import nengo_gui
 import nengo_fpga.networks
 import numpy as np
-import dearpygui.dearpygui as dpg 
+import dearpygui.dearpygui as dpg
 
 import smart_agent
 import smart_agent.vars as vars
@@ -54,7 +54,7 @@ player_info = simulation.PlayerInfo(0, 0, 0)
 #       - Goal Position
 #       - Detection Distance
 #   Check if the model is actually learning or just adapting based on the error
-#       - Check this with performance characteristics
+#       - Check this withchange best direction to be represented in 4 dimensions instead of 1 performance characteristics
 #   Add more tracking in player class (Steps to reach goal, Reward value, Time taken)
 #       - working on
 #   Add performance characteristics: 
@@ -63,11 +63,13 @@ player_info = simulation.PlayerInfo(0, 0, 0)
 #       - Movements per goal (50%) 
 #           - change where it is updated so its only updated on move
 #       - Reward Value at goal (completed)
+#       - amount of goal reached in x seconds
 #   Generate list of hyperparameters for optimization phase
 #       - Learning Rate
 #       - Error Baseline
 #       - Reward Factors
 #       - Neuron Count
+# add noise
 
 
 # Setup the variables for the model
@@ -174,7 +176,6 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         return
     log.info(f"Move at {round(t, 2)} ======================================>")
     #update here
-    player_info.update_actions()
     player_info.update_time()
     # Determine the action to perform (Direction to move)
     index = int(np.argmax(x))
@@ -190,8 +191,10 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if tmp == cvar.arena.player:
         cvar.last_action == Direction.NONE # None if the player did not move
     elif abs(delta_dist.x) == cvar.arena.n - 1:
+        player_info.update_actions()
         cvar.last_action = Point(np.sign(delta_dist.x), 0).asdirection() # Special case to handle wrapping
     else:
+        player_info.update_actions()
         cvar.last_action = delta_dist.asdirection() # Generic form convert change in location to a direction
 
     # Check if the player has stopped moving and log it
@@ -210,7 +213,7 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
         player_info.set_reward(cvar.reward)
         performance.add_player_run_info(player_info.copy(player_info.get_actions, player_info.get_time, player_info.get_reward,))
         player_info.set_actions(0)
-        player_info.set_actions(0)
+        player_info.set_time(0)
         log.info(performance)
         log.info("Agent reached the goal")
         cvar.arena.set_goal()
@@ -344,7 +347,7 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the detection information from the arena
     tmp = cvar.arena.detection().astype(cvar.dtype)
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
-    return tmp.clip(0, 1)
+    return tmp / 23.0
 
 def inhibit(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     if cvar.learning:
@@ -359,40 +362,60 @@ def create_model_fpga():
         bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
         thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
 
+        # pre/post ensembles
+        pac_pre = nengo.Ensemble(
+            n_neurons = cvar.ensemble_neurons,
+            dimensions = cvar.input_dimensions,
+            neuron_type = cvar.neuron_type,
+            label = 'Pac Pre'
+        )
+        pac_post = nengo.Ensemble(
+            n_neurons = cvar.ensemble_neurons,
+            dimensions = cvar.output_dimensions,
+            neuron_type = cvar.neuron_type,
+            label = 'Pac Post'
+        )
+        dist_in = nengo.Node(
+                output=detection,
+                size_out=cvar.input_dimensions,
+                label='Distance Input Node'
+            )
         # Nodes (interaction with simulation)
         # Detection distance input
-        dist_in = nengo.Node(
-            output=detection,
-            size_out=cvar.input_dimensions,
-            label='Distance Input Node'
+        #if not cvar.alt_input:
+        #    dist_in = nengo.Node(
+        #        output=detection,
+        #        size_out=cvar.input_dimensions,
+        #        label='Distance Input Node'
+        #    )
+        # g_dist = nengo.Node(
+        #     output=goal_path_distance,
+        #     size_out=1,
+        #     label='Goal Path Distance'
+        # )
+        # best_dir = nengo.Node(
+        #     output=goal_best_direction,
+        #     size_out=1,
+        #     label='Goal Best Direction'
+        # )
+        # g_pnt = nengo.Node(
+        #     output=goal_point_distance,
+        #     size_out=2,
+        #     label='Goal Point Distance'
+        # )
+        #else:
+        #nengo_noise = nengo.Node(WhiteNoise(), size_out = 4)
+
+        p_loc = nengo.Node(
+            output=player_location,
+            size_out=2,
+            label='Player Location'
         )
-        if not cvar.alt_input:
-            g_dist = nengo.Node(
-                output=goal_path_distance,
-                size_out=1,
-                label='Goal Path Distance'
-            )
-            best_dir = nengo.Node(
-                output=goal_best_direction,
-                size_out=1,
-                label='Goal Best Direction'
-            )
-            g_pnt = nengo.Node(
-                output=goal_point_distance,
-                size_out=2,
-                label='Goal Point Distance'
-            )
-        else:
-            p_loc = nengo.Node(
-                output=player_location,
-                size_out=2,
-                label='Player Location'
-            )
-            g_loc = nengo.Node(
-                output=goal_location,
-                size_out=2,
-                label='Goal Location'
-            )
+        g_loc = nengo.Node(
+            output=goal_location,
+            size_out=2,
+            label='Goal Location'
+        )
         learn_inhibit = nengo.Node(
             output=inhibit,
             size_out=cvar.ensemble_neurons,
@@ -439,6 +462,7 @@ def create_model_fpga():
         )
 
         # Processing Connections
+        '''
         if not cvar.alt_input:
             conn_dist_in = nengo.Connection(
                 pre=dist_in,
@@ -457,20 +481,53 @@ def create_model_fpga():
                 post=fpga.input[2:],
                 transform=np.ones(2, dtype=cvar.dtype) / 23.0,
                 label='Goal Location Input'
-            )
-            conn_dist_in = nengo.Connection(
-                pre=dist_in,
-                post=fpga.input,
-                label='Distance Input Connection'
-            )
+            )'''
 
+
+        # connections for pre and post ensembles
+        conn_dist_in = nengo.Connection(
+            pre=dist_in,
+            post=pac_pre,
+            label='Distance Input Connection',
+        )
+        # conn_pac_pre_p = nengo.Connection(
+        #     pre = p_loc,
+        #     post = pac_pre[:2],
+        #     transform=np.ones(2, dtype=cvar.dtype) / 23.0,
+        #     label = 'player location input connection'
+        # )
+        #conn_pac_pre_g = nengo.Connection(
+        #    pre = g_loc,
+        #    post = pac_pre[2:],
+        #    transform=np.ones(2, dtype=cvar.dtype) / 23.0,
+        #    label = "goal location input"
+        #)
+        conn_pac_out_bg = nengo.Connection(
+            pre = pac_post,
+            post = bg.input,
+            label = 'out -> BG connection'
+        )
+        #conn_pac_pre_bg = nengo.Connection(
+        #    pre = fpga.input,
+        #    post = pac_pre,
+        #    label = 'fpga input -> pre'
+        #)
+        conn_pac_pre_post = nengo.Connection(
+            pre = pac_pre,
+            post = pac_post,
+            label = 'pre -> post'
+        )
+        conn_pac_pre_post.learning_rule_type = cvar.learning_rule_type
+        nengo.Connection(err, conn_pac_pre_post.learning_rule)
+
+        #conn_noise_pre = nengo.Connection(nengo_noise, pac_pre)
 
         # Output Filtering Connections
-        conn_post_bg = nengo.Connection(
-            pre=fpga.output,
-            post=bg.input,
-            label='Post -> BG Connection'
-        )
+        #conn_post_bg = nengo.Connection(
+        #    pre=fpga.output,
+        #    post=pac_post,
+        #    label='Post -> BG Connection'
+        #)
         conn_bg_thal = nengo.Connection(
             pre=bg.output,
             post=thal.input,
@@ -493,15 +550,120 @@ def create_model_fpga():
             post=err_tra,
             label='Post Feedback'
         )
-        conn_learn = nengo.Connection(
-            pre=err,
-            post=fpga.error,
-            label='Learning Connection'
-        )
+
+        #conn_learn = nengo.Connection(
+        #    pre=err,
+        #    post=fpga.error,
+        #    label='Learning Connection'
+        #)
         conn_inhibit = nengo.Connection(
             pre=learn_inhibit,
             post=err.neurons,
             label='Error Inhibit Connection'
+        )
+
+def create_model():
+    global model
+    # Global model definition for use with NengoGUI
+    model = nengo.Network(label='pacman')
+    with model:
+        bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
+        thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
+
+        # Nodes (interaction with simulation)
+        # Detection distance input
+        dist_in = nengo.Node(
+            output=detection,
+            size_out=cvar.input_dimensions,
+            label='Distance Input Node'
+        )
+        # Movement output
+        mov_out = nengo.Node(
+            output=move,
+            size_in=cvar.output_dimensions,
+            label='Movement Output'
+        )
+        # Error computation Input/Output
+        err_tra = nengo.Node(
+            output=error,
+            size_in=cvar.error_dimensions,
+            size_out=cvar.output_dimensions,
+            label='Error Compute',
+        )
+        nreward = nengo.Node(
+            output=lambda x: cvar.reward,
+            size_out=1,
+            label='Reward'
+        )
+
+        # Ensembles
+        pre = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.input_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Pre',
+        )
+        post = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Post',
+        )
+        err = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Error',
+        )
+
+        # Processing Connections
+        conn_dist_in = nengo.Connection(
+            pre=dist_in,
+            post=pre,
+            label='Distance Input Connection',
+        )
+        # conn_inp = nengo.Connection()
+        conn_pre_post = nengo.Connection(
+            pre=pre,
+            post=post,
+            synapse=cvar.connection_synapse,
+            learning_rule_type=cvar.learning_rule_type,
+            solver=cvar.solver_type,
+            label='Pre -> Post Connection',
+        )
+
+        # Output Filtering Connections
+        conn_post_bg = nengo.Connection(
+            pre=post,
+            post=bg.input,
+            label='Post -> BG Connection'
+        )
+        conn_bg_thal = nengo.Connection(
+            pre=bg.output,
+            post=thal.input,
+            label='BG -> Thal Connection'
+        )
+        conn_thal_out = nengo.Connection(
+            pre=thal.output,
+            post=mov_out,
+            label='Action Output Connection'
+        )
+
+        # Learning Connections
+        conn_err_tra = nengo.Connection(
+            pre=err_tra,
+            post=err,
+            label='Error Transformation Connection'
+        )
+        conn_post_err = nengo.Connection(
+            pre=post,
+            post=err_tra,
+            label='Post Feedback'
+        )
+        conn_learn = nengo.Connection(
+            pre=err,
+            post=conn_pre_post.learning_rule,
+            label='Learning Connection'
         )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
@@ -620,9 +782,8 @@ if '__page__' in locals():
     def on_step(sim: nengo.Simulator):
         if sim is not None:
             gvar.sim_time = sim.time
-            if sim.time == 60.0: # Stop learning at 60s in simulation time
+            if sim.time == 120.0: # Stop learning at 60s in simulation time
                 cvar.learning = False
-
-    # Hook that is executed when the simulator (Browser window) is closed
+    
     def on_close(sim: nengo.Simulator):
         log.info(f'Finished simulation after running {sim.n_steps} steps')

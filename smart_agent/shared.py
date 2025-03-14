@@ -375,10 +375,10 @@ class SharedArena(Arena):
         assert start is not None and end is not None and pathKey is not None
         if pathKey in SharedArena.shared_path_cache:
             return SharedArena.shared_path_cache[pathKey]
-        log.warning(f'Entry not found in path cache: {pathKey}')
         with Arena.path_cache_lock:
             if pathKey in Arena.path_cache:
                 return Arena.path_cache[pathKey]
+        log.warning(f'Entry not found in path cache: {pathKey}')
         tmp = self._distance(start, end)
         # Update the path cache
         Arena.path_cache[pathKey] = tmp
