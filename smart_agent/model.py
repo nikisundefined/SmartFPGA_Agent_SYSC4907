@@ -152,7 +152,9 @@ def goal_path_distance(t: float, cvar: AttrDict = cvar) -> int:
     return len(cvar.arena.distance()) / 44.0
 
 def goal_best_direction(t: float, cvar: AttrDict = cvar) -> float:
-    return (int(cvar.arena.best_direction()) + 1) / 5.0
+    tmp = np.array([0, 0, 0, 0], dtype=cvar.dtype)
+    tmp[int(cvar.arena.best_direction())] = 0.5
+    return tmp
 
 def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     delta: Point = cvar.arena.player.point - cvar.arena.goal
