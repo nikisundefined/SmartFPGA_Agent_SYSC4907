@@ -5,6 +5,8 @@
 #include <pybind11/numpy.h>
 #include <pybind11/eigen.h>
 
+#include <eigen3/Eigen/Core>
+
 namespace nengo::neuron_types {
 
     using ValueType = double;
@@ -23,14 +25,14 @@ namespace nengo::neuron_types {
     using ConstGenericMatrixRef = ConstMatrixRef<Eigen::Dynamic, Eigen::Dynamic>;
 
     template <IndexType size>
-    using RowVector = Eigen::Matrix<ValueType, size, 1, Eigen::RowMajor>;
+    using RowVector = Eigen::Matrix<ValueType, 1, size, Eigen::RowMajor>;
     template <IndexType size>
     using RowVectorRef = Eigen::Ref<RowVector<size>>;
     template <IndexType size>
     using ConstRowVectorRef = Eigen::Ref<const RowVector<size>>;
 
     template <IndexType size>
-    using ColumnVector = Eigen::Matrix<ValueType, 1, size, Eigen::ColMajor>;
+    using ColumnVector = Eigen::Vector<ValueType, size>;
     template <IndexType size>
     using ColumnVectorRef = Eigen::Ref<ColumnVector<size>>;
     template <IndexType size>
@@ -46,34 +48,48 @@ namespace nengo::neuron_types {
 
 
     struct NeuronType {
-        // The format of a matrix representing the neurons in an ensemble with a set number
-        template <uint32_t neurons>
-        using NeuralMatrix = Eigen::Ref<Eigen::Matrix<double, neurons, 1, Eigen::RowMajor>>;
-
-        // Represents a dynamic implementation of a Neural Matrix
-        using GenericNeuralMatrix = Eigen::Ref<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
-        using ConstGenericNeuralMatrix = Eigen::Ref<const Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
-
-        using GenericNeuralVector = Eigen::Ref<Eigen::Vector<double, Eigen::Dynamic>>;
-        using ConstGenericNeuralVector = Eigen::Ref<const Eigen::Vector<double, Eigen::Dynamic>>;
-
-        // The function signature for the gain_bias calculation optimized for the given number of neurons
-        template <uint32_t n_neurons>
-        using gain_bias = std::function<pybind11::tuple(const pybind11::object &, const NeuralMatrix<n_neurons> &, const NeuralMatrix<n_neurons> &)>;
-
-        // The function signature for the max_rates_intercepts calculation optimized for the given number of neurons
-        template <uint32_t n_neurons>
-        using max_rates_intercepts = std::function<pybind11::tuple(const pybind11::object &, const NeuralMatrix<n_neurons> &, const NeuralMatrix<n_neurons> &)>;
-
-        template <uint32_t n_neurons>
-        using step = std::function<void(pybind11::object &, float, const NeuralMatrix<n_neurons> &, NeuralMatrix<n_neurons> &, pybind11::kwargs &)>;
-
+        // Compute current injected in each neuron given input, gain and bias.
+        // This is the case when the input is given as a 2D Matrix
+        // In this case gain and bias are broadcast to the input
         template<auto n_samples, auto n_neurons>
-        static Matrix<n_samples, n_neurons> current(__attribute__((unused)) const pybind11::object &self, const MatrixRef<n_samples, n_neurons> &x, const RowVectorRef<n_neurons> &gain, const RowVectorRef<n_neurons> &bias);
+        Matrix<n_samples, n_neurons> current(__attribute__((unused)) const pybind11::object &self,
+            const Matrix<n_samples, n_neurons> &x,
+            const ColumnVector<n_neurons> &gain,
+            const ColumnVector<n_neurons> &bias) {
+            // Validation check to ensure the dimensions are correct when the templated size is dynamic
+            if (n_neurons == Eigen::Dynamic and x.cols() != gain.size()) {
+                auto x_rows = x.rows();
+                auto x_cols = x.cols();
+                auto g_sze = gain.size();
+                std::stringstream ss;
+                ss << "Expected shape (" << x_rows << ", " << g_sze << "); got (" << x_rows << ", " << x_cols << ").";
+                throw std::invalid_argument(ss.str());
+            }
+            // Broadcast the coefficient wise product and sum to the gain and bias
+            // (Reduced to one line to allow the compiler to optimize the operations)
+            return (x.array().rowwise() * gain.transpose().array()).array().rowwise() + bias.transpose().array();
+        }
+        // Same function as above but only when the input is just a vector
+        // The input will be cast to a 2D matrix before being operated on
+        template<auto n_neurons>
+        Matrix<n_neurons, 1> current(const pybind11::object &self,
+            const ColumnVector<n_neurons> &x,
+            const ColumnVectorRef<n_neurons> &gain,
+            const ColumnVectorRef<n_neurons> &bias) {
+            // add the extra dimension for x to satisfy the above function signature
+            return current<n_neurons, 1>(self, x, gain, bias);
+        }
+
+        template<auto n_neurons>
+        std::pair<RowVector<n_neurons>, RowVector<n_neurons>> gain_bias(__attribute__((unused)) const pybind11::object &self,
+            const ColumnVector<n_neurons> &max_rates,
+            const ColumnVector<n_neurons> &intercepts) {
+
+        }
     };
 
     constexpr uint32_t N_NEURONS = 1000;
-
+/*
     struct RectifiedLinear {
         RectifiedLinear() = default;
         static pybind11::tuple gain_bias(__attribute__((unused)) const pybind11::object &self, const NeuronType::GenericNeuralVector &max_rates, const NeuronType::GenericNeuralVector &intercepts);
@@ -86,7 +102,7 @@ namespace nengo::neuron_types {
         static Eigen::MatrixXd rates(pybind11::object &self, const NeuronType::GenericNeuralMatrix &x, const NeuronType::GenericNeuralMatrix &gain, const NeuronType::GenericNeuralMatrix &bias);
         static void step(const pybind11::object &self, float dt, const NeuronType::GenericNeuralMatrix &J, NeuronType::GenericNeuralMatrix &output, NeuronType::GenericNeuralMatrix &voltage);
     };
-
+*/
 }
 
 #endif //NENGOCPP_LIBRARY_H

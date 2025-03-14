@@ -1,17 +1,9 @@
-#include "nengo.h"
+#include "../nengo.h"
 
-using namespace nengo::neuron_types;
+namespace nengo::neuron_types {
 
-template<auto n_samples, auto n_neurons>
-Matrix<n_samples, n_neurons> NeuronType::current(__attribute__((unused)) const pybind11::object &self,
-                                    const MatrixRef<n_samples, n_neurons> &x,
-                                    const RowVectorRef<n_neurons> &gain,
-                                    const RowVectorRef<n_neurons> &bias) {
-    return x;
-    // if (x.cols() == 1) return gain * x + bias; // If is a vector, directly calculate the
-    // return (x.colwise().operator*(gain)).colwise() + bias;
 }
-
+/*
 pybind11::tuple RectifiedLinear::gain_bias(__attribute__((unused)) const pybind11::object &self,
                                                     const NeuronType::GenericNeuralVector &max_rates,
                                                     const NeuronType::GenericNeuralVector &intercepts) {
@@ -75,9 +67,9 @@ void RectifiedLinear::step(const pybind11::object &self,
 }
 
 Eigen::MatrixXd SpikingRectifiedLinear::rates(pybind11::object &self,
-                                                                       const NeuronType::GenericNeuralMatrix &x,
-                                                                       const NeuronType::GenericNeuralMatrix &gain,
-                                                                       const NeuronType::GenericNeuralMatrix &bias) {
+                                           const NeuronType::GenericNeuralMatrix &x,
+                                           const NeuronType::GenericNeuralMatrix &gain,
+                                           const NeuronType::GenericNeuralMatrix &bias) {
     const auto J = self.attr("current")(x, gain, bias).cast<NeuronType::GenericNeuralMatrix>();
     NeuronType::GenericNeuralMatrix out(J);
     RectifiedLinear::step(self, 1.0f, J, out);
@@ -98,28 +90,26 @@ void SpikingRectifiedLinear::step(const pybind11::object &self, const float dt,
         }
     }
 }
-
+*/
 PYBIND11_MODULE(nengocpp, m) {
-    m.doc() = "nengocpp.py";
 
-    // pybind11::class_<NeuronType>(m, "NeuronType")
+    pybind11::class_<nengo::neuron_types::NeuronType>(m, "NeuronType")
+    .def(pybind11::init<>())
+    .def("current", &nengo::neuron_types::NeuronType::current<Eigen::Dynamic, Eigen::Dynamic>);
+
+    // pybind11::class_<RectifiedLinear>(m, "RectifiedLinearImpl")
     //         .def(pybind11::init<>())
-    //         .def("current", &NeuronType::current<Eigen::Dynamic, Eigen::Dynamic>,
-    //             pybind11::arg("x"), pybind11::arg("gain"), pybind11::arg("bias"));
-
-    pybind11::class_<RectifiedLinear>(m, "RectifiedLinearImpl")
-            .def(pybind11::init<>())
-            .def("gain_bias", &RectifiedLinear::gain_bias,
-                pybind11::arg("max_rates"), pybind11::arg("intercepts"))
-            .def("max_rates_intercepts", &RectifiedLinear::max_rates_intercepts,
-                pybind11::arg("gain"), pybind11::arg("bias"))
-            .def("step", &RectifiedLinear::step,
-                pybind11::arg("dt"), pybind11::arg("J"), pybind11::arg("output"));
-
-    pybind11::class_<SpikingRectifiedLinear>(m, "SpikingRectifiedLinearImpl")
-            .def(pybind11::init<>())
-            .def("rates", &SpikingRectifiedLinear::rates,
-                pybind11::arg("x"), pybind11::arg("gain"), pybind11::arg("bias"))
-            .def("step", &SpikingRectifiedLinear::step,
-                pybind11::arg("dt"), pybind11::arg("J"), pybind11::arg("output"), pybind11::arg("voltage"));
+    //         .def("gain_bias", &RectifiedLinear::gain_bias,
+    //             pybind11::arg("max_rates"), pybind11::arg("intercepts"))
+    //         .def("max_rates_intercepts", &RectifiedLinear::max_rates_intercepts,
+    //             pybind11::arg("gain"), pybind11::arg("bias"))
+    //         .def("step", &RectifiedLinear::step,
+    //             pybind11::arg("dt"), pybind11::arg("J"), pybind11::arg("output"));
+    //
+    // pybind11::class_<SpikingRectifiedLinear>(m, "SpikingRectifiedLinearImpl")
+    //         .def(pybind11::init<>())
+    //         .def("rates", &SpikingRectifiedLinear::rates,
+    //             pybind11::arg("x"), pybind11::arg("gain"), pybind11::arg("bias"))
+    //         .def("step", &SpikingRectifiedLinear::step,
+    //             pybind11::arg("dt"), pybind11::arg("J"), pybind11::arg("output"), pybind11::arg("voltage"));
 }
