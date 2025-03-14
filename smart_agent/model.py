@@ -121,8 +121,6 @@ if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exist
     log.info(f"Loaded {len(shared.SharedArena.shared_path_cache)} paths from cache")
 
 ### Input Node Functions ###
-## functions currently being used:
-## goal location and player location
 
 # Returns the current location of the player as a 2D Point
 def player_location(t: float, cvar: AttrDict = cvar) -> np.ndarray:
@@ -363,50 +361,46 @@ def create_model_fpga():
         thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
 
         # pre/post ensembles
-        pac_pre = nengo.Ensemble(
+        pre = nengo.Ensemble(
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.input_dimensions,
             neuron_type = cvar.neuron_type,
-            label = 'Pac Pre'
+            label = 'Pre'
         )
-        pac_post = nengo.Ensemble(
+        post = nengo.Ensemble(
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.output_dimensions,
             neuron_type = cvar.neuron_type,
-            noise=nengo.processes.WhiteNoise(),
-            label = 'Pac Post'
+            label = 'Post'
         )
-        dist_in = nengo.Node(
-                output=detection,
-                size_out=cvar.input_dimensions,
-                label='Distance Input Node'
-            )
+        err = nengo.Ensemble(
+            n_neurons=cvar.ensemble_neurons,
+            dimensions=cvar.output_dimensions,
+            neuron_type=cvar.neuron_type,
+            label='Error'
+        )
+        
         # Nodes (interaction with simulation)
-        # Detection distance input
-        #if not cvar.alt_input:
-        #    dist_in = nengo.Node(
-        #        output=detection,
-        #        size_out=cvar.input_dimensions,
-        #        label='Distance Input Node'
-        #    )
-        # g_dist = nengo.Node(
-        #     output=goal_path_distance,
-        #     size_out=1,
-        #     label='Goal Path Distance'
-        # )
+        dist_in = nengo.Node(
+            output=detection,
+            size_out=cvar.input_dimensions,
+            label='Distance Input Node'
+        )
+        g_dist = nengo.Node(
+            output=goal_path_distance,
+            size_out=1,
+            label='Goal Path Distance'
+        )
         best_dir = nengo.Node(
             output=goal_best_direction,
             size_out=cvar.input_dimensions,
             label='Goal Best Direction'
         )
-        # g_pnt = nengo.Node(
-        #     output=goal_point_distance,
-        #     size_out=2,
-        #     label='Goal Point Distance'
-        # )
-        #else:
-        #nengo_noise = nengo.Node(WhiteNoise(), size_out = 4)
-
+        g_pnt = nengo.Node(
+            output=goal_point_distance,
+            size_out=2,
+            label='Goal Point Distance'
+        )
         p_loc = nengo.Node(
             output=player_location,
             size_out=2,
@@ -444,23 +438,23 @@ def create_model_fpga():
         )
 
         # Ensembles
-        fpga = nengo_fpga.networks.FpgaPesEnsembleNetwork(
-            "ADDME",
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            learning_rate=cvar.learning_rate,
-            label='FPGA'
-        )
-        if cvar.neuron_type in [nengo.neurons.SpikingRectifiedLinear, nengo.neurons.RectifiedLinear]:
-            fpga.ensemble.neuron_type = cvar.neuron_type
-        fpga.connection.solver = cvar.solver_type
-        fpga.connection.synapse = cvar.connection_synapse
-        err = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Error',
-        )
+        # fpga = nengo_fpga.networks.FpgaPesEnsembleNetwork(
+        #     "ADDME",
+        #     n_neurons=cvar.ensemble_neurons,
+        #     dimensions=cvar.output_dimensions,
+        #     learning_rate=cvar.learning_rate,
+        #     label='FPGA'
+        # )
+        # if cvar.neuron_type in [nengo.neurons.SpikingRectifiedLinear, nengo.neurons.RectifiedLinear]:
+        #     fpga.ensemble.neuron_type = cvar.neuron_type
+        # fpga.connection.solver = cvar.solver_type
+        # fpga.connection.synapse = cvar.connection_synapse
+        # err = nengo.Ensemble(
+        #     n_neurons=cvar.ensemble_neurons,
+        #     dimensions=cvar.output_dimensions,
+        #     neuron_type=cvar.neuron_type,
+        #     label='Error',
+        # )
 
         # Processing Connections
         '''
@@ -485,55 +479,48 @@ def create_model_fpga():
             )'''
 
 
-        # connections for pre and post ensembles
+        # Input Connections
         conn_dist_in = nengo.Connection(
             pre=dist_in,
-            post=pac_pre,
+            post=pre,
             label='Distance Input Connection',
         )
         conn_best_in = nengo.Connection(
             pre=best_dir,
-            post=pac_pre,
+            post=pre,
             label='Best Direction Connection'
         )
-        # conn_pac_pre_p = nengo.Connection(
-        #     pre = p_loc,
-        #     post = pac_pre[:2],
-        #     transform=np.ones(2, dtype=cvar.dtype) / 23.0,
-        #     label = 'player location input connection'
-        # )
-        #conn_pac_pre_g = nengo.Connection(
-        #    pre = g_loc,
-        #    post = pac_pre[2:],
-        #    transform=np.ones(2, dtype=cvar.dtype) / 23.0,
-        #    label = "goal location input"
-        #)
+        conn_pre_pl = nengo.Connection(
+            pre = p_loc,
+            post = pre[:2],
+            transform=np.ones(2, dtype=cvar.dtype) / 23.0,
+            label = 'Player Location Input Connection'
+        )
+        conn_pre_gl = nengo.Connection(
+           pre = g_loc,
+           post = pre[2:],
+           transform=np.ones(2, dtype=cvar.dtype) / 23.0,
+           label = "Goal Location Input Connction"
+        )
         conn_pac_out_bg = nengo.Connection(
-            pre = pac_post,
+            pre = post,
             post = bg.input,
-            label = 'out -> BG connection'
+            label = 'Post -> BG Connection'
         )
-        #conn_pac_pre_bg = nengo.Connection(
-        #    pre = fpga.input,
-        #    post = pac_pre,
-        #    label = 'fpga input -> pre'
-        #)
-        conn_pac_pre_post = nengo.Connection(
-            pre = pac_pre,
-            post = pac_post,
-            label = 'pre -> post'
+        conn_pre_post = nengo.Connection(
+            pre = pre,
+            post = post,
+            function=lambda x: np.random.rand(),
+            label = 'Pre -> Post Connection'
         )
-        conn_pac_pre_post.learning_rule_type = cvar.learning_rule_type
-        nengo.Connection(err, conn_pac_pre_post.learning_rule)
-
-        #conn_noise_pre = nengo.Connection(nengo_noise, pac_pre)
+        conn_pre_post.learning_rule_type = cvar.learning_rule_type
+        conn_err_learn = nengo.Connection(
+            pre=err, 
+            post=conn_pre_post.learning_rule,
+            label='Error -> Learning Rule Connection'
+        )
 
         # Output Filtering Connections
-        #conn_post_bg = nengo.Connection(
-        #    pre=fpga.output,
-        #    post=pac_post,
-        #    label='Post -> BG Connection'
-        #)
         conn_bg_thal = nengo.Connection(
             pre=bg.output,
             post=thal.input,
@@ -557,11 +544,7 @@ def create_model_fpga():
             label='Post Feedback'
         )
 
-        #conn_learn = nengo.Connection(
-        #    pre=err,
-        #    post=fpga.error,
-        #    label='Learning Connection'
-        #)
+        # Inhibit Connections
         conn_inhibit = nengo.Connection(
             pre=learn_inhibit,
             post=err.neurons,
