@@ -638,7 +638,7 @@ class Performance:
     
     def __json__(self) -> dict:
         return {
-            'player_info': dict({k.__json__(): v.__json__() for k, v in self.player_info.items()}),
+            'player_info': {str(k): v.__json__() for k, v in self.player_info.items()},
             'avg_time': self.avg_time,
             'avg_actions': self.avg_actions,
             'avg_reward': self.avg_reward,
