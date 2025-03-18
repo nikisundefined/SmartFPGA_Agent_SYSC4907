@@ -7,7 +7,7 @@ import numpy as np
 import pathlib
 import smart_agent.simulation as simulation
 from dataclasses import dataclass, asdict
-import nengopy.neurons as nengopy
+#import nengopy.neurons as nengopy
 
 Arena = simulation.Arena
 Direction = simulation.Direction
@@ -54,11 +54,11 @@ class DefaultConsoleDict:
     # The number of neurons per ensemble
     ensemble_neurons: int = 400
     # Learning rate of the learning rule
-    learning_rate: float = 5e-5
+    learning_rate: float = 5e-4
     # The adaptive factor used with the Adaptive LIF neuron type
     tau_n: float = 0.01
     # Neuron type used in all ensembles
-    neuron_type: nengo.neurons.NeuronType = nengopy.RectifiedLinear()
+    neuron_type: nengo.neurons.NeuronType = nengo.neurons.LIF()
     # Solver type used for learning connections
     solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True)
     # Learning rule used for learning connections
@@ -74,7 +74,7 @@ class DefaultConsoleDict:
     # The current reward of the agent
     reward: float = 1.0
     # The minimum value for an action to be selected
-    movement_threshold: float = 1e-6
+    movement_threshold: float = 1e-5
     # The arena the agent with move within
     arena: Arena = Arena()
     # Was an action performed by the agent since the last action
@@ -84,7 +84,7 @@ class DefaultConsoleDict:
     # The synapse used for the connection between pre and post ensembles
     connection_synapse: float = 0.01
     # The logging level for the script to print out
-    log_level: int = int(logging.DEBUG)
+    log_level: int = int(logging.INFO)
     # Path to the A* path cache file
     path_cache_file: pathlib.Path = pathlib.Path(__file__).parent.parent / 'path_cache.json'
     # Selector for the alternate set of inputs to the model (Only useful with the fpga model)
