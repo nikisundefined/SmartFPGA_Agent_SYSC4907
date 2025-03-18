@@ -9,11 +9,15 @@ Notes:
 
 TODO:
     RIGHTNOW:
-        - [ ] JSON export of Performance
-        - [ ] Add goal locations to Performance
+        - [x] Clean up metrics implementation
+        - [x] JSON export of Performance
+        - [x] Add goal locations to Performance
         - [ ] Test running model on board
-        - [ ] Fix cache implementation
+        - [x] Fix cache implementation
+            - [x] When generating a path add all sub paths (0 -> n, 1 -> n, 2 -> n) to the cache to prevent recompute along the current path
         - [ ] Test local GUI on board
+        - [ ] Integrate path caching in C++
+        - [ ] Fix main code to run without nengo gui
     Reduce memory usage
         - [x] C++ implementation
         - [ ] Integrate into `model.py`

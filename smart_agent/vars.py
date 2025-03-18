@@ -7,7 +7,6 @@ import numpy as np
 import pathlib
 import smart_agent.simulation as simulation
 from dataclasses import dataclass, asdict
-#import nengopy.neurons as nengopy
 
 Arena = simulation.Arena
 Direction = simulation.Direction
@@ -16,8 +15,8 @@ log: logging.Logger = logging.getLogger('smart_agent.vars')
 
 # Default json encoder for custom object serialization
 class JsonEncoder(json.JSONEncoder):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def default(self, o):
         try:
@@ -93,6 +92,10 @@ class DefaultConsoleDict:
     reward_reset: bool = False
     # Is the model still learning
     learning: bool = True
+    # Path to file to dump metrics
+    metrics_file: pathlib.Path = pathlib.Path(__file__).parent.parent / 'metrics.json'
+    # Should the path cache be loaded
+    load_path_cache: bool = False
 
 # Access classs for Console Variables with local storage
 class ConsoleDict:

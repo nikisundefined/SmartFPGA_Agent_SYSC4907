@@ -12,70 +12,6 @@ from enum import IntEnum
 
 log: logging.Logger = logging.getLogger('smart_agent.simulation')
 
-### player info class ###
-class PlayerInfo:
-    def __init__(self, actions, time, reward):
-        self.actions = actions 
-        self.time = time
-        self.reward = reward
-
-    def copy(self, actions, time, reward) -> 'PlayerInfo':
-        temp = PlayerInfo(actions, time, reward)
-        temp.actions = self.actions
-        temp.time = self.time
-        temp.reward = self.reward
-        return temp
-    def get_time(self) -> int:
-        return self.time
-    def set_time(self, time):
-        self.time = time
-    def get_actions(self) -> int:
-        return self.actions
-    def set_actions(self, actions):
-        self.actions = actions
-    def get_reward(self) -> int:
-        return self.reward
-    def set_reward(self, reward):
-        self.reward = reward
-    def update_time(self):
-        self.time += 1
-    def update_actions(self):
-        self.actions += 1
-    def __str__(self) -> str:
-        return f"Player information; time : {self.time}, amount of steps : {self.actions}, current reward : {self.reward}"
-### end of player info ###
-
-### performance metrics class ###
-class Performance:
-    def __init__(self, player_info):
-        self.player_info = player_info
-        self.avg_time = 0
-        self.avg_reward = 0
-        self.avg_actions = 0
-
-    def get_player_info(self) -> PlayerInfo:
-        return self.player_info
-    def set_player_info(self, player):
-        self.player_info = player
-    def add_player_run_info(self, player):
-        self.player_info.append(player) 
-        time = 0
-        reward = 0
-        action = 0
-        for player in self.player_info:
-            time += player.get_time()
-            action += player.get_actions()
-            reward += player.get_reward()
-
-        self.avg_time = time / len(self.player_info)
-        self.avg_actions = action / len(self.player_info)
-        self.avg_reward = reward / len(self.player_info)
-        self.goal_count = len(self.player_info)
-
-    def __str__(self):
-        return f"Performance metrics; average time to goal:{self.avg_time}, average moves: {self.avg_actions}, average reward: {self.avg_reward}, Goals reached: {self.goal_count}"
-
-### end of performance metric ###
 class Point:
 
     # Convert a 4D numpy array into a point represented as: [-Y, X, Y, -X]
@@ -189,6 +125,7 @@ class Player:
         self.point: Point = Point(x, y)
         self.score: int = score
         self.positions: list[Point] = positions
+        self.info: PlayerInfo = PlayerInfo(0, 0, 0)
 
     # Return a copy of this player object
     def copy(self) -> 'Player':
@@ -372,6 +309,7 @@ class Arena:
         self.player: Player = Player.frompoint(Arena._player_start)
         self.goal: Point = Point(Arena._goal_start.x, Arena._goal_start.y)
         self.grid: np.ndarray = Arena._create_grid()
+        self.performance: Performance = Performance()
         assert self.grid[self.player.y][self.player.x] != Arena.WALL
         assert self.grid[self.goal.y][self.goal.x] != Arena.WALL
     
@@ -382,6 +320,7 @@ class Arena:
             'player': self.player.__json__(),
             'goal': self.goal.__json__(),
             'grid': self.grid.tolist(),
+            'performance': self.performance.__json__()
         }
     
     @classmethod
@@ -500,6 +439,8 @@ class Arena:
         if self.on_goal():
             self.grid[self.player.y][self.player.x] = self.PLAYER
             self.player.collect_goal()
+            self.performance.add_player_run_info(self.player)
+            self.player.info.reset()
         else:
             self.grid[self.goal.y][self.goal.x] = self.EMPTY
 
@@ -623,6 +564,89 @@ class Arena:
                     s += "G"
             s += "\n"
         return s
+    
+### player info class ###
+class PlayerInfo:
+    def __init__(self, actions: int, time: int, reward: float):
+        self.actions: int = actions 
+        self.time: int = time
+        self.reward: float = reward
+
+    def copy(self) -> 'PlayerInfo':
+        return PlayerInfo(self.actions, self.time, self.reward)
+    
+    def update_time(self):
+        self.time += 1
+
+    def update_actions(self):
+        self.actions += 1
+
+    def reset(self):
+        self.actions = 0
+        self.time = 0
+
+    def __str__(self) -> str:
+        return f"Player information\n\tTime: {self.time}\n\tNumber of Steps: {self.actions}\n\tCurrent Reward: {self.reward}"
+    
+    def __repr__(self) -> str:
+        return str(self)
+    
+    def __json__(self) -> dict:
+        return {
+            'actions': self.actions,
+            'time': self.time,
+            'reward': self.reward
+        }
+### end of player info ###
+
+### performance metrics class ###
+class Performance:
+    def __init__(self):
+        self.player_info: dict[Point, PlayerInfo] = {}
+        self.avg_time: float = 0.0
+        self.avg_reward: float = 0.0
+        self.avg_actions: float = 0.0
+        self.goal_locations: list[Point] = []
+
+    def add_player_run_info(self, player: Player) -> None:
+        self.player_info[player.point] = player.info.copy() 
+        self.goal_locations.append(player.point.copy())
+        self.compute_avg()
+    
+    def compute_avg(self) -> None:
+        time = 0
+        reward = 0
+        action = 0
+        for _, player in self.player_info.items():
+            time += player.time
+            action += player.actions
+            reward += player.reward
+        
+        self.avg_time = time / len(self.player_info)
+        self.avg_actions = action / len(self.player_info)
+        self.avg_reward = reward / len(self.player_info)
+
+    @property
+    def goal_count(self) -> int:
+        return len(self.goal_locations)
+
+    def __str__(self) -> str:
+        return f"Performance metrics\n\tAvg. Time to Goal: {self.avg_time}\n\tAvg. Number of Actions: {self.avg_actions}\n\tAvg Reward: {self.avg_reward}\n\tGoals Reached: {self.goal_count}"
+    
+    def __repr__(self) -> str:
+        return str(self)
+    
+    def __json__(self) -> dict:
+        return {
+            'player_info': dict({k.__json__(): v.__json__() for k, v in self.player_info.items()}),
+            'avg_time': self.avg_time,
+            'avg_actions': self.avg_actions,
+            'avg_reward': self.avg_reward,
+            'goal_count': self.goal_count,
+            'goal_locations': [x.__json__() for x in self.goal_locations]
+        }
+
+### end of performance metric ###
 
 def main():
     while key != 'q':
@@ -644,8 +668,6 @@ def main():
             print("Player has reached the goal")
             arena.set_goal()
             print(f"Goal is now located at: ({arena.goal.x}, {arena.goal.y})")
-
-
 
 if __name__ == "__main__":
     import sys

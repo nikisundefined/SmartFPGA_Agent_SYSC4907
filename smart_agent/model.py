@@ -4,6 +4,8 @@ import math
 import time
 import logging
 import threading
+import pathlib
+import json
 
 log = logging.getLogger('smart_agent.model')
 
@@ -12,7 +14,6 @@ import nengo.learning_rules
 import nengo.neurons
 import nengo.solvers
 import nengo_gui
-import nengo_fpga.networks
 import numpy as np
 import dearpygui.dearpygui as dpg
 
@@ -28,57 +29,24 @@ Point = simulation.Point
 Player = simulation.Player
 Arena = simulation.Arena
 PathCache = simulation.PathCache
-performance = simulation.Performance([])
-player_info = simulation.PlayerInfo(0, 0, 0)
 
-# NOTE: 
-#   Consider Super/Sub reward state (Super state = Score * Time, Sub state = distance to goal)
-#       Scale Super/Sub reward state error differently (Super state = scale global error, Sub state = scale directional error)
-#   Consider increasing the error for the second best move in the path
+# Performance metrics vars
+# performance = simulation.Performance()
+# player_info = simulation.PlayerInfo(0, 0, 0)
 
-# NOTE:
-#   Conversion of nengo neuron model to C++ HLS equivalent
-#       - Convert python implementation to C++
-#       - Create python proxy class to wrap C++ implementation using something like pybind11
-#       - Replace implementation of neuron model in library with custom model
-
-# TODO:
-# Short Term:
-#   Reduce memory usage
-#   Finish implementation of NeuronTypes in C++
-#   Investigate large pause when t ~= int(t)
-#   Determine the source of the memory leak at shutdown
-# Long Term:
-#   Find better inputs
-#       - Player Position
-#       - Goal Position
-#       - Detection Distance
-#   Check if the model is actually learning or just adapting based on the error
-#       - Check this withchange best direction to be represented in 4 dimensions instead of 1 performance characteristics
-#   Add more tracking in player class (Steps to reach goal, Reward value, Time taken)
-#       - working on
-#   Add performance characteristics: 
-#       - Time per goal (50%)
-#           - change where it is updated to only update on whole number
-#       - Movements per goal (50%) 
-#           - change where it is updated so its only updated on move
-#       - Reward Value at goal (completed)
-#       - amount of goal reached in x seconds
-#   Generate list of hyperparameters for optimization phase
-#       - Learning Rate
-#       - Error Baseline
-#       - Reward Factors
-#       - Neuron Count
-# add noise
-
+# Learning Inhibit Vars
+LEARN_STOP_TIME: float = 240.0
+LEARN_MEASURE_TIME: float = LEARN_STOP_TIME * 1.25
 
 # Setup the variables for the model
 cvar = smart_agent.cvar
 gvar = smart_agent.gvar
 log.setLevel(cvar.log_level)
 
+if not cvar.load_path_cache:
+    log.warning('Not loading path cache entries')
 # If the shared cache is not loaded and the cache file exists, attempt to load it
-if len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exists():
+elif len(shared.SharedArena.shared_path_cache) == 0 and cvar.path_cache_file.exists():
     attached: bool = False
     try:
         # Check if the cache is already stored in shared memory
@@ -172,9 +140,9 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     # Only attempt to move when t is an integer, ex. 1, 2, 3, ...
     if not math.isclose(t, int(t)):
         return
-    log.info(f"Move at {round(t, 2)} ======================================>")
+    log.info(f"Move at {round(t, 2)}")
     #update here
-    player_info.update_time()
+    cvar.arena.player.info.update_time()
     # Determine the action to perform (Direction to move)
     index = int(np.argmax(x))
     if math.isclose(x[index],0,abs_tol=cvar.movement_threshold): # Check if the input value was larger than the threshold
@@ -189,10 +157,10 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     if tmp == cvar.arena.player:
         cvar.last_action == Direction.NONE # None if the player did not move
     elif abs(delta_dist.x) == cvar.arena.n - 1:
-        player_info.update_actions()
+        cvar.arena.player.info.update_actions()
         cvar.last_action = Point(np.sign(delta_dist.x), 0).asdirection() # Special case to handle wrapping
     else:
-        player_info.update_actions()
+        cvar.arena.player.info.update_actions()
         cvar.last_action = delta_dist.asdirection() # Generic form convert change in location to a direction
 
     # Check if the player has stopped moving and log it
@@ -207,19 +175,16 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
 
     # Update the goal location when the agent reaches the goal
     if cvar.arena.on_goal():
-        #push the performance here
-        player_info.set_reward(cvar.reward)
-        performance.add_player_run_info(player_info.copy(player_info.get_actions, player_info.get_time, player_info.get_reward,))
-        player_info.set_actions(0)
-        player_info.set_time(0)
-        log.info(performance)
         log.info("Agent reached the goal")
+
         cvar.arena.set_goal()
         log.debug(f"Player score is now: {cvar.arena.player.score}")
         if cvar.reward_reset:
             cvar.reward = vars.DefaultConsoleDict.reward
         else:
             cvar.reward += GOAL_COLLECT_REWARD
+        
+        log.info(cvar.arena.performance)
     cvar.action_performed = True
     log.debug(f"Current detection: {detection(0)}")
 
@@ -332,6 +297,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     cvar.reward += reward(cvar.arena.player, cvar.player_moved, path)
     # Ensure that the minimum reward state possible is 1 for the later division to always succeed
     cvar.reward = max(cvar.reward, 1.0)
+    # Update the player info about the change in reward
+    cvar.arena.player.info.reward = cvar.reward
 
     # Recompute the error with the updated reward
     err = err_calc(best_direction)
@@ -360,7 +327,7 @@ def create_model_fpga():
         bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
         thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
 
-        # pre/post ensembles
+        # Ensembles
         pre = nengo.Ensemble(
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.input_dimensions,
@@ -438,46 +405,12 @@ def create_model_fpga():
         )
 
         # Ensembles
-        #fpga = nengo_fpga.networks.FpgaPesEnsembleNetwork(
-        #    "ADDME",
-        #    n_neurons=cvar.ensemble_neurons,
-        #    dimensions=cvar.output_dimensions,
-        #    learning_rate=cvar.learning_rate,
-        #    label='FPGA'
-        #)
-        #if cvar.neuron_type in [nengo.neurons.SpikingRectifiedLinear, nengo.neurons.RectifiedLinear]:
-        #    fpga.ensemble.neuron_type = cvar.neuron_type
-        #fpga.connection.solver = cvar.solver_type
-        #fpga.connection.synapse = cvar.connection_synapse
         err = nengo.Ensemble(
             n_neurons=cvar.ensemble_neurons,
             dimensions=cvar.output_dimensions,
             neuron_type=cvar.neuron_type,
             label='Error',
         )
-
-        # Processing Connections
-        '''
-        if not cvar.alt_input:
-            conn_dist_in = nengo.Connection(
-                pre=dist_in,
-                post=fpga.input,
-                label='Distance Input Connection',
-            )
-        else:
-            conn_p_loc = nengo.Connection(
-                pre=p_loc,
-                post=fpga.input[:2],
-                transform=np.ones(2, dtype=cvar.dtype) / 23.0,
-                label='Player Location Input'
-            )
-            conn_g_loc = nengo.Connection(
-                pre=g_loc,
-                post=fpga.input[2:],
-                transform=np.ones(2, dtype=cvar.dtype) / 23.0,
-                label='Goal Location Input'
-            )'''
-
 
         # Input Connections
         conn_dist_in = nengo.Connection(
@@ -490,18 +423,18 @@ def create_model_fpga():
             post=pre,
             label='Best Direction Connection'
         )
-        conn_pre_pl = nengo.Connection(
-            pre = p_loc,
-            post = pre[:2],
-            transform=np.ones(2, dtype=cvar.dtype) / 23.0,
-            label = 'Player Location Input Connection'
-        )
-        conn_pre_gl = nengo.Connection(
-           pre = g_loc,
-           post = pre[2:],
-           transform=np.ones(2, dtype=cvar.dtype) / 23.0,
-           label = "Goal Location Input Connction"
-        )
+        # conn_pre_pl = nengo.Connection(
+        #     pre = p_loc,
+        #     post = pre[:2],
+        #     transform=np.ones(2, dtype=cvar.dtype) / 23.0,
+        #     label = 'Player Location Input Connection'
+        # )
+        # conn_pre_gl = nengo.Connection(
+        #    pre = g_loc,
+        #    post = pre[2:],
+        #    transform=np.ones(2, dtype=cvar.dtype) / 23.0,
+        #    label = "Goal Location Input Connction"
+        # )
         conn_pac_out_bg = nengo.Connection(
             pre = post,
             post = bg.input,
@@ -510,7 +443,6 @@ def create_model_fpga():
         conn_pre_post = nengo.Connection(
             pre = pre,
             post = post,
-            function=lambda x: np.random.rand(),
             label = 'Pre -> Post Connection'
         )
         conn_pre_post.learning_rule_type = cvar.learning_rule_type
@@ -549,110 +481,6 @@ def create_model_fpga():
             pre=learn_inhibit,
             post=err.neurons,
             label='Error Inhibit Connection'
-        )
-
-def create_model():
-    global model
-    # Global model definition for use with NengoGUI
-    model = nengo.Network(label='pacman')
-    with model:
-        bg = nengo.networks.BasalGanglia(dimensions=cvar.output_dimensions)
-        thal = nengo.networks.Thalamus(dimensions=cvar.output_dimensions)
-
-        # Nodes (interaction with simulation)
-        # Detection distance input
-        dist_in = nengo.Node(
-            output=detection,
-            size_out=cvar.input_dimensions,
-            label='Distance Input Node'
-        )
-        # Movement output
-        mov_out = nengo.Node(
-            output=move,
-            size_in=cvar.output_dimensions,
-            label='Movement Output'
-        )
-        # Error computation Input/Output
-        err_tra = nengo.Node(
-            output=error,
-            size_in=cvar.error_dimensions,
-            size_out=cvar.output_dimensions,
-            label='Error Compute',
-        )
-        nreward = nengo.Node(
-            output=lambda x: cvar.reward,
-            size_out=1,
-            label='Reward'
-        )
-
-        # Ensembles
-        pre = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.input_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Pre',
-        )
-        post = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Post',
-        )
-        err = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Error',
-        )
-
-        # Processing Connections
-        conn_dist_in = nengo.Connection(
-            pre=dist_in,
-            post=pre,
-            label='Distance Input Connection',
-        )
-        # conn_inp = nengo.Connection()
-        conn_pre_post = nengo.Connection(
-            pre=pre,
-            post=post,
-            synapse=cvar.connection_synapse,
-            learning_rule_type=cvar.learning_rule_type,
-            solver=cvar.solver_type,
-            label='Pre -> Post Connection',
-        )
-
-        # Output Filtering Connections
-        conn_post_bg = nengo.Connection(
-            pre=post,
-            post=bg.input,
-            label='Post -> BG Connection'
-        )
-        conn_bg_thal = nengo.Connection(
-            pre=bg.output,
-            post=thal.input,
-            label='BG -> Thal Connection'
-        )
-        conn_thal_out = nengo.Connection(
-            pre=thal.output,
-            post=mov_out,
-            label='Action Output Connection'
-        )
-
-        # Learning Connections
-        conn_err_tra = nengo.Connection(
-            pre=err_tra,
-            post=err,
-            label='Error Transformation Connection'
-        )
-        conn_post_err = nengo.Connection(
-            pre=post,
-            post=err_tra,
-            label='Post Feedback'
-        )
-        conn_learn = nengo.Connection(
-            pre=err,
-            post=conn_pre_post.learning_rule,
-            label='Learning Connection'
         )
 
 # Main function that displays a GUI of the arena and agent and runs the simulator for the agent with one time step per frame upto target_frame_rate
@@ -736,7 +564,7 @@ if __name__ == '__main__':
 
 if '__page__' in locals():
     logging.root.handlers = []
-    # logging.root.handlers = [smart_agent.handle]
+    smart_agent.handle.setFormatter(logging.Formatter(f'{threading.current_thread().name}[{{name}}] | {{levelname}} -> {{message}}', style='{'))
     # Check if the local gui is running and set flag
     for t in threading.enumerate():
         if t.name == 'GUI':
@@ -771,14 +599,16 @@ if '__page__' in locals():
     def on_step(sim: nengo.Simulator):
         if sim is not None:
             gvar.sim_time = sim.time
-            if sim.time == 240.0: # Stop learning at 60s in simulation time
-                log.info("agents Performance after 4")
-                log.info(performance)
+            if sim.time == LEARN_STOP_TIME: # Stop learning at 60s in simulation time
+                log.info(f"Agent Performance after {round(LEARN_STOP_TIME / 60.0, 2)} mins")
+                log.info(cvar.arena.performance)
                 cvar.learning = False
-            elif sim.time == 300.0:
-                log.info("agents Performance after 5 mins")
-                log.info(performance)
-                
+            elif sim.time == LEARN_MEASURE_TIME:
+                log.info(f"Agent Performance after {round(LEARN_MEASURE_TIME / 60.0, 2)} mins")
+                log.info(cvar.arena.performance)            
     
     def on_close(sim: nengo.Simulator):
         log.info(f'Finished simulation after running {sim.n_steps} steps')
+        with open(cvar.metrics_file, 'w') as f:
+            json.dump(cvar.arena.performance, f, indent=4, cls=vars.JsonEncoder)
+        log.info(f'Metrics dumped to {cvar.metrics_file}')
