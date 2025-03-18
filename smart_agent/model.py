@@ -155,12 +155,12 @@ def goal_path_distance(t: float, cvar: AttrDict = cvar) -> int:
 
 def goal_best_direction(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     tmp = np.array([0, 0, 0, 0], dtype=cvar.dtype)
-    tmp[int(cvar.arena.best_direction())] = 0.5
+    tmp[int(cvar.arena.best_direction())] = 0.4 #update this to 0.2?
     return tmp
 
 def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     delta: Point = cvar.arena.player.point - cvar.arena.goal
-    return np.array([delta.x, delta.y], dtype=cvar.dtype) / 23.0
+    return np.array([delta.x, delta.y], dtype=cvar.dtype) / 23.0 # + 0.3?
 
 ### End Input Node Functions ###
 
@@ -260,7 +260,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the best path to the goal
     path: list[Point] = cvar.arena.distance()
     # Compute the best direction based on the best path
-    delta_dist: Point = 0 if len(path) < 2 else path[1] - cvar.arena.player.point
+    delta_dist: Point = Point(0,0) if len(path) < 2 else path[1] - cvar.arena.player.point
     best_direction: Direction = Point(-np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == 22 else delta_dist.asdirection()
 
     # Compute the error for an early return
@@ -347,7 +347,7 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the detection information from the arena
     tmp = cvar.arena.detection().astype(cvar.dtype)
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
-    return tmp / 23.0
+    return (tmp / 23.0) + 0.3
 
 def inhibit(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     if cvar.learning:
@@ -444,17 +444,17 @@ def create_model_fpga():
         )
 
         # Ensembles
-        fpga = nengo_fpga.networks.FpgaPesEnsembleNetwork(
-            "ADDME",
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            learning_rate=cvar.learning_rate,
-            label='FPGA'
-        )
-        if cvar.neuron_type in [nengo.neurons.SpikingRectifiedLinear, nengo.neurons.RectifiedLinear]:
-            fpga.ensemble.neuron_type = cvar.neuron_type
-        fpga.connection.solver = cvar.solver_type
-        fpga.connection.synapse = cvar.connection_synapse
+        #fpga = nengo_fpga.networks.FpgaPesEnsembleNetwork(
+        #    "ADDME",
+        #    n_neurons=cvar.ensemble_neurons,
+        #    dimensions=cvar.output_dimensions,
+        #    learning_rate=cvar.learning_rate,
+        #    label='FPGA'
+        #)
+        #if cvar.neuron_type in [nengo.neurons.SpikingRectifiedLinear, nengo.neurons.RectifiedLinear]:
+        #    fpga.ensemble.neuron_type = cvar.neuron_type
+        #fpga.connection.solver = cvar.solver_type
+        #fpga.connection.synapse = cvar.connection_synapse
         err = nengo.Ensemble(
             n_neurons=cvar.ensemble_neurons,
             dimensions=cvar.output_dimensions,
@@ -788,8 +788,14 @@ if '__page__' in locals():
     def on_step(sim: nengo.Simulator):
         if sim is not None:
             gvar.sim_time = sim.time
-            if sim.time == 120.0: # Stop learning at 60s in simulation time
+            if sim.time == 240.0: # Stop learning at 60s in simulation time
+                log.info("agents Performance after 4")
+                log.info(performance)
                 cvar.learning = False
+            elif sim.time == 300.0:
+                log.info("agents Performance after 5 mins")
+                log.info(performance)
+                
     
     def on_close(sim: nengo.Simulator):
         log.info(f'Finished simulation after running {sim.n_steps} steps')
