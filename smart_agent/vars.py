@@ -140,6 +140,12 @@ class DefaultGUIDict:
     offset_time: float = 0.0
     # The current simulator time
     sim_time: float = 0.0
+    # The texture backing the local GUI
+    texture: np.ndarray = np.zeros(shape=(23 * 10, 23 * 10, 3), dtype=np.float32)
+    # A copy of the previous state of the grid for delta generation
+    previous_grid: np.ndarray = None
+    # Size of each block in the texture
+    block_size: int = 10
 
 # Stores all variables related to the local and nengo gui representation
 class GUIDict:

@@ -4,7 +4,6 @@ import math
 import time
 import logging
 import threading
-import pathlib
 import json
 
 log = logging.getLogger('smart_agent.model')
@@ -23,16 +22,13 @@ import smart_agent.shared as shared
 import smart_agent.simulation as simulation
 import smart_agent.gui as gui
 
+# Import some names from other files to avoid rewriting all names in this file
 AttrDict = vars.ConsoleDict
 Direction = simulation.Direction
 Point = simulation.Point
 Player = simulation.Player
 Arena = simulation.Arena
 PathCache = simulation.PathCache
-
-# Performance metrics vars
-# performance = simulation.Performance()
-# player_info = simulation.PlayerInfo(0, 0, 0)
 
 # Learning Inhibit Vars
 LEARN_STOP_TIME: float = 240.0
@@ -189,7 +185,7 @@ def move(t: float, x: np.ndarray, cvar: AttrDict = cvar):
     log.debug(f"Current detection: {detection(0)}")
 
     if gvar.in_gui:
-        gui.update_grid()
+        gui.update()
 
 ### End Output Node Functions ###
 
@@ -526,6 +522,10 @@ def web_gui():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+    if cvar.log_level == int(logging.NOTSET):
+        import yappi
+        yappi.set_clock_type('cpu')
+        yappi.start()
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
         if '--nengo' in sys.argv:
@@ -538,6 +538,14 @@ if __name__ == '__main__':
             g.start()
             gvar.in_gui = False
             t.join(5)
+
+            if cvar.log_level == int(logging.NOTSET):
+                yappi.stop()
+                threads = yappi.get_thread_stats()
+                for thread in threads:
+                    log.info(f'Logging stats for thread: {thread.name}')
+                    yappi.get_func_stats(ctx_id=thread.id, filter_callback=lambda x: 'smart_agent' in x.module).print_all()
+
             # Ensure all references to shared memory are removed before exiting
             del cvar
             del gvar

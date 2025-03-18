@@ -20,9 +20,9 @@ TODO:
         - [ ] Fix main code to run without nengo gui
     Reduce memory usage
         - [x] C++ implementation
-        - [ ] Integrate into `model.py`
+            - [ ] Integrate into `model.py`
             - [ ] Rewrite `simulation.py` and `shared.py` to import C++ implementation
-        - [ ] Test C++ implementation 
+            - [ ] Test C++ implementation 
     Finish implementation of NeuronTypes in C++/HLS
         - [ ] NeuronType
             - [ ] current
