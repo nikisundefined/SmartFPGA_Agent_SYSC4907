@@ -1,7 +1,6 @@
 from . import vars
 from . import shared
 from . import simulation
-from . import gui
 
 import logging
 import sys

@@ -122,6 +122,8 @@ class SharedDict:
 # Store variables related to the GUI implementation that should be shared between all GUI implementations
 @dataclass(frozen=True)
 class DefaultGUIDict:
+    # Disable local GUI
+    disable_gui: bool = False
     # The arena the GUI representation should be based from
     arena: Arena = None
     # Is the local gui running

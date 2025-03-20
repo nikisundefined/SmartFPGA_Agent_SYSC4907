@@ -8,19 +8,23 @@ import json
 
 log = logging.getLogger('smart_agent.model')
 
+import smart_agent
 import nengo
 import nengo.learning_rules
 import nengo.neurons
 import nengo.solvers
 import nengo_gui
 import numpy as np
-import dearpygui.dearpygui as dpg
+try:
+    import dearpygui.dearpygui as dpg
+    import smart_agent.gui as gui
+except ImportError:
+    log.warning(f"Failed to load DearPyGUI, unable to load local GUI")
+    smart_agent.gvar.disable_gui = True
 
-import smart_agent
 import smart_agent.vars as vars
 import smart_agent.shared as shared
 import smart_agent.simulation as simulation
-import smart_agent.gui as gui
 
 # Import some names from other files to avoid rewriting all names in this file
 AttrDict = vars.ConsoleDict
@@ -529,22 +533,25 @@ if __name__ == '__main__':
     # Allow changing the logging level by command line parameter
     if len(sys.argv) > 1:
         if '--nengo' in sys.argv:
-            # Start the gui in another thread
-            gvar.in_gui = True
-            t = threading.Thread(target=web_gui, name='GUI')
-            t.start()
+            if not gvar.disable_gui:
+                # Start the gui in another thread
+                gvar.in_gui = True
+                t = threading.Thread(target=web_gui, name='GUI')
+                t.start()
             # Start the nengo web gui in the main thread
             g = nengo_gui.GUI(filename=__file__, editor=True)
             g.start()
-            gvar.in_gui = False
-            t.join(5)
+
+            if not gvar.disable_gui:
+                gvar.in_gui = False
+                t.join(5)
 
             if cvar.log_level == int(logging.NOTSET):
                 yappi.stop()
                 threads = yappi.get_thread_stats()
                 for thread in threads:
                     log.info(f'Logging stats for thread: {thread.name}')
-                    yappi.get_func_stats(ctx_id=thread.id, filter_callback=lambda x: 'smart_agent' in x.module).print_all()
+                    yappi.get_func_stats(ctx_id=thread.id).print_all()
 
             # Ensure all references to shared memory are removed before exiting
             del cvar
@@ -565,6 +572,8 @@ if __name__ == '__main__':
 
     # Catch any errors gracefully and exit
     try:
+        if gvar.disable_gui:
+            raise ImportError('Failed to load local GUI library')
         main()
     except Exception as e:
         log.critical(f"ERROR: {e}", exc_info=e)
