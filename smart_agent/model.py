@@ -347,7 +347,7 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the detection information from the arena
     tmp = cvar.arena.detection().astype(cvar.dtype)
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
-    return (tmp / 23.0) + 0.3
+    return (tmp / 23.0)
 
 def inhibit(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     if cvar.learning:
@@ -373,7 +373,7 @@ def create_model_fpga():
             n_neurons = cvar.ensemble_neurons,
             dimensions = cvar.output_dimensions,
             neuron_type = cvar.neuron_type,
-            noise=nengo.processes.WhiteNoise(),
+            #noise=nengo.processes.WhiteNoise(),
             label = 'Pac Post'
         )
         dist_in = nengo.Node(
