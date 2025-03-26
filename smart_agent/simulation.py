@@ -363,7 +363,7 @@ class Arena:
 
     # Polymorphic method to access _tile_pnt and _tile_pos
     def _tile(self, *args, **kwargs) -> int:
-        if type(args[0]) == int:
+        if type(args[0]) is int:
             return self._tile_pos(args[0], args[1])
         elif 'x' in kwargs and 'y' in kwargs:
             return self._tile_pos(kwargs['x'], kwargs['y'])
@@ -606,14 +606,19 @@ class PlayerInfo:
 ### performance metrics class ###
 class Performance:
     def __init__(self):
-        self.player_info: dict[Point, PlayerInfo] = {}
+        self.player_info: dict[Point, Union[PlayerInfo, list[PlayerInfo]]] = {}
         self.avg_time: float = 0.0
         self.avg_reward: float = 0.0
         self.avg_actions: float = 0.0
         self.goal_locations: list[Point] = []
 
     def add_player_run_info(self, player: Player) -> None:
-        self.player_info[Point.copy(player.point)] = player.info.copy() 
+        if player.point in self.player_info:
+            if type(self.player_info[player.point]) is not list:
+                self.player_info[player.point] = [self.player_info[player.point]]
+            self.player_info[player.point].append(player.info.copy())
+        else:
+            self.player_info[Point.copy(player.point)] = player.info.copy() 
         self.goal_locations.append(player.point.copy())
         self.compute_avg()
         if len(self.player_info) != len(self.goal_locations):
@@ -644,7 +649,7 @@ class Performance:
     
     def __json__(self) -> dict:
         return {
-            'player_info': {str(k): v.__json__() for k, v in self.player_info.items()},
+            'player_info': {str(k): v.__json__() if type(v) is list else [x.__json__() for x in v] for k, v in self.player_info.items()},
             'avg_time': self.avg_time,
             'avg_actions': self.avg_actions,
             'avg_reward': self.avg_reward,

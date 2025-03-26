@@ -124,7 +124,7 @@ def goal_path_distance(t: float, cvar: AttrDict = cvar) -> int:
 
 def goal_best_direction(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     tmp = np.array([0, 0, 0, 0], dtype=cvar.dtype)
-    tmp[int(cvar.arena.best_direction())] = 0.4 #update this to 0.2?
+    tmp[int(cvar.arena.best_direction())] = 0.4
     return tmp
 
 def goal_point_distance(t: float, cvar: AttrDict = cvar) -> np.ndarray:
@@ -215,8 +215,8 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
             err_scale: float = ERROR_CURVE / cvar.reward + 0.01
         else:
             err_scale: float = math.sqrt(-(cvar.reward - 50)) / 8 + 0.25
-        # err_scale: float = (ERROR_CURVE / cvar.reward) # Factor to scale error by
-        err_val: float = (x[best_direction] - BASELINE_ERROR) * err_scale  # Compute the error value for the best direction
+        # Compute the error value for the best direction
+        err_val: float = (x[best_direction] - BASELINE_ERROR) * err_scale
         # Set the direction we want to go in to the computed error value
         err[best_direction] = err_val
         # Prevent the error from going beyond the baseline error value
