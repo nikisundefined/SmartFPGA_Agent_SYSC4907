@@ -53,7 +53,7 @@ class Point:
     
     # Add 'Point'-like objects to this point object
     def __add__(self, other: Union['Point', 'Direction', 'Player']) -> 'Point':
-        if other is Direction:
+        if type(other) is Direction:
             return self + other.topoint()
         return Point(self.x + other.x, self.y + other.y)
 
@@ -388,6 +388,12 @@ class Arena:
     
     # Returns the best direction to go if starting at start and going to end
     def best_direction(self, start: Point | None = None, end: Point | None = None) -> Direction:
+        DIRECTION_MAP: dict[Direction, Direction] = {
+            Direction.UP: Direction.DOWN,
+            Direction.DOWN: Direction.UP,
+            Direction.LEFT: Direction.RIGHT,
+            Direction.RIGHT: Direction.LEFT
+        }
         # Set defaults for start and end
         if start is None:
             start = self.player.point
@@ -397,7 +403,11 @@ class Arena:
         path: list[Point] = self.distance(start, end)
         # Compute the best direction based on the best path
         delta_dist: Point = path[1] - start
-        return Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
+        best_dir: Direction = Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
+        opposite_dir: Direction = DIRECTION_MAP[best_dir]
+        if start + opposite_dir == path[1]:
+            return opposite_dir
+        return best_dir
     
     def move(self, dir: Direction) -> None:
         """Moves the player in the direction given"""

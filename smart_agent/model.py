@@ -315,7 +315,7 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the detection information from the arena
     tmp = cvar.arena.detection().astype(cvar.dtype)
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
-    return (tmp / 23.0) + 0.3
+    return (tmp / 46.0)
 
 def inhibit(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     if cvar.learning:
@@ -504,7 +504,7 @@ def main():
             sim.run_steps(int(1/sim.dt)) # Perform one frame of the simulaton
             gui.update_text() # Update text boxes in the gui
             dpg.set_item_pos('seed', [dpg.get_viewport_width()/2-dpg.get_item_rect_size('seed')[0]/2, 265]) # Update custom text box added earlier
-            gui.update_grid(cvar.arena) # Update the arena representation inside the GUI
+            gui.update() # Update the arena representation inside the GUI
             dpg.render_dearpygui_frame() # Render the updated frame to the GUI
             expected_end_time: float = start_time + target_frame_time # Compute how long to wait for the next frame
             time.sleep(max(expected_end_time - time.time(), 0)) # Wait until its time to render the next frame
