@@ -7,6 +7,7 @@ import numpy as np
 import pathlib
 import smart_agent.simulation as simulation
 from dataclasses import dataclass, asdict
+import nengopy.neurons
 
 Arena = simulation.Arena
 Direction = simulation.Direction
