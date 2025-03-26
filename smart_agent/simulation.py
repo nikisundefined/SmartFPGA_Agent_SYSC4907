@@ -403,11 +403,7 @@ class Arena:
         path: list[Point] = self.distance(start, end)
         # Compute the best direction based on the best path
         delta_dist: Point = path[1] - start
-        best_dir: Direction = Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
-        opposite_dir: Direction = DIRECTION_MAP[best_dir]
-        if start + opposite_dir == path[1]:
-            return opposite_dir
-        return best_dir
+        return Point(np.sign(-delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
     
     def move(self, dir: Direction) -> None:
         """Moves the player in the direction given"""
