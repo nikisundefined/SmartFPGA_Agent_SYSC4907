@@ -356,11 +356,10 @@ class Arena:
     # Returns a random point on the grid that is empty
     def _random_tile(self) -> Point:
         tmp = Point(np.random.randint(0, self.n), np.random.randint(0, self.m))
-        while self._tile(tmp) == self.WALL:
+        while self._tile(tmp) != self.EMPTY:
             tmp.x = np.random.randint(0, self.n)
             tmp.y = np.random.randint(0, self.m)
         return tmp
-
 
     # Polymorphic method to access _tile_pnt and _tile_pos
     def _tile(self, *args, **kwargs) -> int:
@@ -451,11 +450,10 @@ class Arena:
             self.grid[self.goal.y][self.goal.x] = self.EMPTY
 
         # Keep generating random locations for the goal while they are not walls
-        tmp: Point = Point(0, 0)
+        tmp: Point = self._random_tile()
         # Special condition: 2 tile cannot be reached an must be manually excluded
-        while self._tile(tmp) == self.WALL or (tmp.x == 11 and (tmp.y == 5 or tmp.y == 17)):
-            tmp.x = np.random.randint(0, 23)
-            tmp.y = np.random.randint(1, 22)
+        while (tmp.x == 11 and (tmp.y == 5 or tmp.y == 17)):
+            tmp = self._random_tile()
         self.goal = tmp
         self.grid[self.goal.y][self.goal.x] = self.GOAL
     
@@ -615,9 +613,11 @@ class Performance:
         self.goal_locations: list[Point] = []
 
     def add_player_run_info(self, player: Player) -> None:
-        self.player_info[player.point] = player.info.copy() 
+        self.player_info[Point.copy(player.point)] = player.info.copy() 
         self.goal_locations.append(player.point.copy())
         self.compute_avg()
+        if len(self.player_info) != len(self.goal_locations):
+            raise RuntimeError("Failed to add player info to performance object")
     
     def compute_avg(self) -> None:
         time = 0

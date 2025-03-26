@@ -12,12 +12,12 @@ TODO:
         - [x] Clean up metrics implementation
         - [x] JSON export of Performance
         - [x] Add goal locations to Performance
-        - [ ] Test running model on board
+        - [x] Test running model on board
         - [x] Fix cache implementation
             - [x] When generating a path add all sub paths (0 -> n, 1 -> n, 2 -> n) to the cache to prevent recompute along the current path
-        - [ ] Test local GUI on board
-        - [ ] Integrate path caching in C++
-        - [ ] Fix main code to run without nengo gui
+        - [x] Test local GUI on board (No X server for running)
+        - [x] Integrate path caching in C++ (Scrapped due to time)
+        - [x] Fix main code to run without nengo gui
     Reduce memory usage
         - [x] C++ implementation
             - [ ] Integrate into `model.py`
@@ -59,20 +59,22 @@ TODO:
         - [ ] Player Position
         - [ ] Goal Position
         - [x] Detection Distance
+        - [x] Best Direction
     Check if the model is actually learning or just adapting based on the error
         - Seems to only be adapting based on the error
         - [ ] Add noise to inputs/outputs/error
     Add more tracking in `Player` class
-        - [ ] Steps to reach goal
-        - [ ] Reward Value
+        - [x] Steps to reach goal
+        - [x] Reward Value
         - [ ] Time Taken (Real Time)
+        - [x] Time Taken (Simulation Time)
     Add performance characteristics
-        - [ ] Time per goal
+        - [x] Time per goal
             - Change where it is updated to only update on whole number
-        - [ ] Movements per goal
+        - [x] Movements per goal
             - Change where it is updated so its only updated on move
         - [x] Reward Value at goal
-        - [ ] Amount of goal reached in x seconds
+        - [x] Amount of goal reached in x seconds
     Generate list of hyperparameters for optimization phase
         - Learning Rate
         - Error Baseline
