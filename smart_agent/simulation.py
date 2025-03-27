@@ -387,12 +387,6 @@ class Arena:
     
     # Returns the best direction to go if starting at start and going to end
     def best_direction(self, start: Point | None = None, end: Point | None = None) -> Direction:
-        DIRECTION_MAP: dict[Direction, Direction] = {
-            Direction.UP: Direction.DOWN,
-            Direction.DOWN: Direction.UP,
-            Direction.LEFT: Direction.RIGHT,
-            Direction.RIGHT: Direction.LEFT
-        }
         # Set defaults for start and end
         if start is None:
             start = self.player.point

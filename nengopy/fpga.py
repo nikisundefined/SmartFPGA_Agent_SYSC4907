@@ -213,26 +213,35 @@ class RectifiedLinear(nengo.neurons.RectifiedLinear):
     def gain_bias(self, max_rates, intercepts):
         expected_output = super().gain_bias(max_rates, intercepts)
         calculated_output = neuron.gain_bias(max_rates, intercepts)
-        if all(expected_output == calculated_output):
+
+        # Ensure element-wise comparison of numpy arrays inside tuples
+        if all(np.allclose(e, c) for e, c in zip(expected_output, calculated_output)):
             return calculated_output
+
         print("FPGA returned the wrong output")
         return expected_output
     
     def max_rates_intercepts(self, gain, bias):
         expected_output = super().max_rates_intercepts(gain, bias)
         calculated_output = neuron.max_rates_intercepts(gain, bias)
-        if all(expected_output == calculated_output):
+
+        # Ensure element-wise comparison of numpy arrays inside tuples
+        if all(np.allclose(e, c) for e, c in zip(expected_output, calculated_output)):
             return calculated_output
+
         print("FPGA returned the wrong output")
         return expected_output
-    
+
     def step(self, dt, J, output):
         tmp_output = np.array(output, ndmin=1, copy=True, dtype=np.float64)
+
         expected_output = super().step(dt, J, tmp_output)
         calculated_output = neuron.step(dt, J, output, amplitude=self.amplitude)
-        if not all(expected_output == calculated_output):
+
+        # Ensure element-wise comparison of numpy arrays inside tuples
+        if not all(np.allclose(e, c) for e, c in zip(expected_output, calculated_output)):
             print("FPGA returned the wrong output")
-            output[...] = tmp_output[...]
+            output[...] = tmp_output  # Copy correct values to output
 
 # Check if the overlay has already been loaded
 def aquire_lock() -> bool:
