@@ -1,7 +1,8 @@
 import os.path
 import multiprocessing
-import inspect
 import time
+import logging
+import fcntl
 
 import numpy as np
 from pynq import DefaultIP
@@ -13,6 +14,9 @@ from pynq.lib.dma import DMA
 
 import nengo
 import nengo.neurons
+
+log: logging.Logger = logging.getLogger('nengopy.fpga')
+LOCK_FILE: str = 'fpga.lock'
 
 # Notes:
 #   DMA channel seems to fail if any transfer fails 
@@ -34,18 +38,21 @@ class RectifiedLinearFPGA:
     RectifiedLinear_Step = 2
 
     lock = multiprocessing.RLock()
+    instance: 'RectifiedLinearFPGA' = None
 
     def __init__(self, amplitude: float, hls_ip: 'FPGADriver', dma: DMA):
         self.amplitude = amplitude
         self.ip = hls_ip
         self.dma = dma
         self.buffer: PynqBuffer = None
+        log.info('Hello from RectifiedLinearFPGA')
 
     def _allocate(self, elems: int) -> None:
         with RectifiedLinearFPGA.lock:
             if self.buffer is not None:
                 del self.buffer
             self.buffer = allocate(shape=(elems, 4), dtype=np.float64)
+            log.debug(f'Allocated FPGA buffer with size {self.buffer.size}')
     
     def _load_buffer(self, function: int, arg0, arg1 = None, arg2 = None) -> None:
         def to_array(x):
@@ -194,7 +201,9 @@ class FPGADriver(DefaultIP):
     bindto = ['xilinx.com:hls:nengofpga:1.0']
 
     def rectified_linear(self, dma: DMA) -> RectifiedLinearFPGA:
-        return RectifiedLinearFPGA(1, self, dma)
+        if not RectifiedLinearFPGA.instance:
+            RectifiedLinearFPGA.instance = RectifiedLinearFPGA(1, self, dma)
+        return RectifiedLinearFPGA.instance
     
 class RectifiedLinear(nengo.neurons.RectifiedLinear):
     def __init__(self, **kwargs):
@@ -209,19 +218,38 @@ class RectifiedLinear(nengo.neurons.RectifiedLinear):
     def step(self, dt, J, output):
         return neuron.step(dt, J, output, amplitude=self.amplitude)
 
+# Check if the overlay has already been loaded
+def aquire_lock() -> bool:
+    fd = None
+    try:
+        fd = open(LOCK_FILE, 'w')
+        fcntl.flock(fd, fcntl.LOCK_NB | fcntl.LOCK_EX)
+        return True
+    except (OSError, IOError):
+        if fd: os.close(fd)
+        return False
+
+download: bool = aquire_lock()
+bitstream_path: str = '/home/xilinx/nengofpga/nengofpga.bit'
+ol = Overlay(bitstream_path, download=download)
+hls_ip: FPGADriver = ol.nengofpga_0
+dma_rw: DMA = ol.ReadWriteDMA
+neuron: RectifiedLinearFPGA = hls_ip.rectified_linear(dma_rw)
+neuron_type: RectifiedLinear = RectifiedLinear()
+
 if __name__ == '__main__':
     PL.reset() # Reset any cached versions of the bitstream and hardware info
-    bitstream_path: str = '/home/xilinx/nengofpga/nengofpga.bit'
-    print("Programming the FPGA")
-    print("Path to bitstream")
-    tmp: str = input(f'[{bitstream_path}]: ')
-    if len(tmp) != 0: bitstream_path = tmp
-    if not bitstream_path.endswith('.bit'):
-        raise ValueError('Not a bitstream file')
-    if not os.path.exists(bitstream_path):
-        raise FileNotFoundError(f'Bitstream file {bitstream_path} does not exist')
+    
+    log.info("Programming the FPGA")
+    # print("Path to bitstream")
+    # tmp: str = input(f'[{bitstream_path}]: ')
+    # if len(tmp) != 0: bitstream_path = tmp
+    # if not bitstream_path.endswith('.bit'):
+    #     raise ValueError('Not a bitstream file')
+    # if not os.path.exists(bitstream_path):
+    #     raise FileNotFoundError(f'Bitstream file {bitstream_path} does not exist')
     ol = Overlay(bitstream_path)
-    print("FPGA programmed")
+    log.info("FPGA programmed")
 
     if 'nengofpga_0' not in ol.ip_dict.keys() or 'ReadWriteDMA' not in ol.ip_dict.keys():
         raise RuntimeError('NengoFPGA or DMA not found')
@@ -230,6 +258,7 @@ if __name__ == '__main__':
     neuron: RectifiedLinearFPGA = hls_ip.rectified_linear(dma_rw)
     neuron_type: RectifiedLinear = RectifiedLinear()
 
+if __name__ == '__main__':
     print("Generating Model")
     with nengo.Network('TestNet') as net:
         pre = nengo.Ensemble(
@@ -251,20 +280,3 @@ if __name__ == '__main__':
             print(f"Running sim at: {sim.time}")
             sim.run(1)
             time.sleep(5)
-
-
-# PL.reset() # Reset any cached versions of the bitstream and hardware info
-# bitstream_path: str = '/home/xilinx/nengofpga/nengofpga.bit'
-# ol = Overlay(bitstream_path)
-# ol.ip_dict.keys()
-# hls_ip: DefaultIP = ol.nengofpga_0
-# hls_ip.register_map
-# dma_rw: DMA = ol.ReadWriteDMA
-# dma_rw.register_map
-# fpga_input: PynqBuffer = allocate(shape=(4,4), dtype=np.float64)
-# fpga_output: PynqBuffer = allocate(shape=(4,4), dtype=np.float64)
-# fpga_input[:, 1:-1] = np.random.rand(4, 2)
-# fpga_input
-# dma_rw.recvchannel.transfer(fpga_output)
-# dma_rw.sendchannel.transfer(fpga_input)
-# fpga_output
