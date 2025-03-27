@@ -9,7 +9,6 @@ import pathlib
 import json
 from typing import Union
 from enum import IntEnum
-import pandas as pd
 
 log: logging.Logger = logging.getLogger('smart_agent.simulation')
 
