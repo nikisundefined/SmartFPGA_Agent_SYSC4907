@@ -211,13 +211,28 @@ class RectifiedLinear(nengo.neurons.RectifiedLinear):
         super().__init__(*kwargs)
     
     def gain_bias(self, max_rates, intercepts):
-        return neuron.gain_bias(max_rates, intercepts)
+        expected_output = super().gain_bias(max_rates, intercepts)
+        calculated_output = neuron.gain_bias(max_rates, intercepts)
+        if all(expected_output == calculated_output):
+            return calculated_output
+        print("FPGA returned the wrong output")
+        return expected_output
     
     def max_rates_intercepts(self, gain, bias):
-        return neuron.max_rates_intercepts(gain, bias)
+        expected_output = super().max_rates_intercepts(gain, bias)
+        calculated_output = neuron.max_rates_intercepts(gain, bias)
+        if all(expected_output == calculated_output):
+            return calculated_output
+        print("FPGA returned the wrong output")
+        return expected_output
     
     def step(self, dt, J, output):
-        return neuron.step(dt, J, output, amplitude=self.amplitude)
+        tmp_output = np.array(output, ndmin=1, copy=True, dtype=np.float64)
+        expected_output = super().step(dt, J, tmp_output)
+        calculated_output = neuron.step(dt, J, output, amplitude=self.amplitude)
+        if not all(expected_output == calculated_output):
+            print("FPGA returned the wrong output")
+            output[...] = tmp_output[...]
 
 # Check if the overlay has already been loaded
 def aquire_lock() -> bool:
