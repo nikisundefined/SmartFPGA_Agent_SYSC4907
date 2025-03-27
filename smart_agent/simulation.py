@@ -9,6 +9,7 @@ import pathlib
 import json
 from typing import Union
 from enum import IntEnum
+from functools import reduce
 
 log: logging.Logger = logging.getLogger('smart_agent.simulation')
 
@@ -622,9 +623,14 @@ class Performance:
         reward = 0
         action = 0
         for _, player in self.player_info.items():
-            time += player.time
-            action += player.actions
-            reward += player.reward
+            if type(player) is PlayerInfo:
+                time += reduce(lambda x, y: x+y.time, player, 0)
+                action += reduce(lambda x, y: x+y.actions, player, 0)
+                reward += reduce(lambda x, y: x+y.reward, player, 0)
+            else:
+                time += player.time
+                action += player.actions 
+                reward += player.reward
         
         self.avg_time = time / len(self.player_info)
         self.avg_actions = action / len(self.player_info)
