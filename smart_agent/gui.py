@@ -72,7 +72,7 @@ def move(sender, app_data, user_data: simulation.Direction):
         print(f"DEBUG: {arena}")
 
 def inhibit(sender, app_data, user_data: bool):
-    smart_agent.cvar.learning = False
+    smart_agent.cvar.learning = not smart_agent.cvar.learning
 
 def create_gui(arena: simulation.Arena | None = None, block_size: int = 10):
     # If the arena is not given load attempt to load it from shared memory
@@ -105,7 +105,7 @@ def create_gui(arena: simulation.Arena | None = None, block_size: int = 10):
         dpg.add_text(f'Score: {arena.player.score}', tag='score')
         dpg.add_text('Time: 0.0', tag='time')
         dpg.add_text(f"{smart_agent.gvar.seed}", tag='seed')
-        dpg.add_text(f"Is learning: {smart_agent.cvar.learning}", tag='learning')
+        dpg.add_text(f"Learning", tag='learning')
     
     dpg.add_value_registry(tag='value_registry')
     dpg.add_float_value(tag='timer', parent='value_registry')
@@ -142,7 +142,10 @@ def update_text():
     dpg.set_item_pos('time', [dpg.get_viewport_width()/2-tim_rect[0]/2, txt_rect[1]])
 
     # Update the learning boolean
-    dpg.set_value('learning', f"Is learning: {cvar.learning}")
+    if cvar.learning:
+        dpg.set_value('learning', f"Learning")
+    else:
+        dpg.set_value('learning', f"Not learning")
     learn_rect = dpg.get_item_rect_size('learning')
     dpg.set_item_pos('learning', [dpg.get_viewport_width()/2-learn_rect[0]/2, 280])
 
