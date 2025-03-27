@@ -1,145 +1,132 @@
-#include "ap_axi_sdata.h"
-#include "hls_stream.h"
-#include <cmath>
-#include <utility>
+#include "rectified_linear.h"
+#define ENABLE_MAX_RATES_INTERCEPTS
+#define ENABLE_GAIN_BIAS
+#define ENABLE_STEP
 
-// Converts an integer to a floating point and vice versa
-// Used to convert the input from a stream
-union fp_int {
-    int64_t i;
-    double fp;
-};
+#ifdef ENABLE_GAIN_BIAS
 
-struct output_t {
-    fp_int value_a;
-    fp_int value_b;
-    fp_int value_c;
-    fp_int value_d;
-};
-
-enum FPGAFunction : uint8_t {
-    RectifiedLinear_GainBias,
-    RectifiedLinear_MaxRatesIntercepts,
-    RectifiedLinear_Step
-};
-
-// Type of a packet sent and received by a stream
-typedef ap_axis<sizeof(fp_int) * 8,1,1,1> inputPkt; // Input 1 64-bit floating point number
-typedef ap_axis<sizeof(output_t) * 8,1,1,1> outputPkt; // Output upto 4 64-bit floating point numbers
-
-namespace RectifiedLinear {
-
-    std::pair<double, double> gain_bias(const double &max_rates, const double &intercepts) {
-        auto gain = max_rates / (1 - intercepts);
-        auto bias = -intercepts * gain;
-        return {gain, bias};
-    }
-
-    std::pair<double, double> max_rates_intercepts(const double &gain, const double &bias) {
-        auto intercepts = -bias / gain;
-        auto max_rates = gain * (1 - intercepts);
-        return {max_rates, intercepts};
-    }
-
-    void step(const double &amplitude, const double &J, double &output) {
-        output = amplitude * std::fmax(0.0, J);
-    }
-
+std::pair<double, double> _gain_bias(const double &max_rates, const double &intercepts) {
+	auto gain = max_rates / (1 - intercepts);
+	auto bias = -intercepts * gain;
+	return {gain, bias};
 }
 
-void nengofpga(uint8_t funcSelect, double amplitude,
-    hls::stream<inputPkt> &A, hls::stream<inputPkt> &B, hls::stream<inputPkt> &C, hls::stream<outputPkt> &D) {
-#pragma HLS INTERFACE s_axilite port=funcSelect
-#pragma HLS INTERFACE s_axilite port=amplitude
-#pragma HLS INTERFACE s_axilite port=return
-#pragma HLS INTERFACE axis port=A,B,C,D
+void gain_bias(hls::stream<pair> &A, hls::stream<pair> &B) {
+#pragma HLS INTERFACE s_axilite port=return bundle=CTRL
+#pragma HLS INTERFACE axis port=A,B
+	pair tmp;
+	double *val_a;
+	double *val_b;
+	do {
+		tmp = A.read();
+		val_a = (double *)&tmp.data;
+		val_b = ((double *)&tmp.data) + 1;
 
-    // Data structures used in parsing input streams
-    fp_int a_data, b_data, c_data;
-    output_t d_data;
-    inputPkt a_pkt, b_pkt, c_pkt;
-    // Load packet from input streams (non-blocking to allow fewer arguments to be sent at a time) [I think]
-    A.read_nb(a_pkt);
-    B.read_nb(b_pkt);
-    C.read_nb(c_pkt);
-    // Load data from packets
-    a_data.i = a_pkt.data;
-    b_data.i = b_pkt.data;
-    c_data.i = c_pkt.data;
+		auto gb = _gain_bias(*val_a, *val_b);
+		*val_a = gb.first;
+		*val_b = gb.second;
 
-    // Prepare the output packet
-    outputPkt d_pkt;
-    d_pkt.dest = a_pkt.dest;
-    d_pkt.id = a_pkt.id;
-    d_pkt.keep = a_pkt.keep;
-    d_pkt.last = a_pkt.last;
-    d_pkt.strb = a_pkt.strb;
-    d_pkt.user = a_pkt.user;
-
-    std::pair<double, double> tmp;
-    // Select the function needed
-    switch (static_cast<FPGAFunction>(funcSelect)) {
-        case RectifiedLinear_Step:
-            RectifiedLinear::step(amplitude, a_data.fp, d_data.value_a.fp);
-            break;
-        case RectifiedLinear_GainBias:
-            tmp = RectifiedLinear::gain_bias(a_data.fp, b_data.fp);
-            d_data.value_a.fp = tmp.first;
-            d_data.value_b.fp = tmp.second;
-            break;
-        case RectifiedLinear_MaxRatesIntercepts:
-            tmp = RectifiedLinear::max_rates_intercepts(a_data.fp, b_data.fp);
-            d_data.value_a.fp = tmp.first;
-            d_data.value_b.fp = tmp.second;
-            break;
-    }
-    // Move the data into the output packet
-    d_pkt.data = reinterpret_cast<ap_int<sizeof(output_t) * 8> &>(d_data);
-    // Send the packet back to the PS through the output stream
-    D.write(d_pkt);
+		B.write(tmp);
+	} while (not tmp.last);
 }
 
+#endif
 
-/* Old Working Code
-#include "ap_axi_sdata.h"
-#include "hls_stream.h"
-#include <cmath>
+#ifdef ENABLE_MAX_RATES_INTERCEPTS
 
-union fp_int {
-    int64_t i;
-    double fp;
-};
-
-static_assert(sizeof(fp_int) * 8 == 64, "Incorrect size of int");
-typedef ap_axis<sizeof(fp_int) * 8,1,1,1> transPkt;
-
-void step(hls::stream< transPkt > &S_J, hls::stream< transPkt > &S_AMPLITUDE,
-         hls::stream< transPkt > &S_OUTPUT) {
-#pragma hls interface s_axilite port=return
-#pragma HLS INTERFACE axis port=S_J,S_AMPLITUDE,S_OUTPUT
-
-    fp_int amplitude, j;
-    transPkt pkt_amplitude, pkt_j;
-    while(1) {
-        // Ensure streams still have data to process
-        if (S_J.empty() or S_AMPLITUDE.empty()) break;
-        // Read the values from them
-        S_J.read(pkt_j);
-        S_AMPLITUDE.read(pkt_amplitude);
-
-        // Put them into the union to convert to double
-        j.i = pkt_j.data;
-        amplitude.i = pkt_amplitude.data;
-
-        // Perform the step operation
-        j.fp = std::fmax(0.0, j.fp) * amplitude.fp;
-
-        // Write the result back into the amplitude packet and return the result
-        pkt_amplitude.data = j.i;
-        S_OUTPUT.write(pkt_amplitude);
-        if (pkt_j.last or pkt_amplitude.last) {
-            break;
-        }
-    }
+std::pair<double, double> _max_rates_intercepts(const double &gain, const double &bias) {
+	auto intercepts = -bias / gain;
+	auto max_rates = gain * (1 - intercepts);
+	return {max_rates, intercepts};
 }
-*/
+
+void max_rates_intercepts(hls::stream<pair> &A, hls::stream<pair> &B) {
+#pragma HLS INTERFACE s_axilite port=return bundle=CTRL
+#pragma HLS INTERFACE axis port=A,B
+	pair tmp;
+	double *val_a;
+	double *val_b;
+	do {
+		tmp = A.read();
+		val_a = (double *)&tmp.data;
+		val_b = ((double *)&tmp.data) + 1;
+
+		auto mri = _max_rates_intercepts(*val_a, *val_b);
+		*val_a = mri.first;
+		*val_b = mri.second;
+
+		B.write(tmp);
+	} while (not tmp.last);
+}
+
+#endif
+
+#ifdef ENABLE_STEP
+
+double _step(const double &amplitude, const double &J) {
+	return amplitude * (J < 0 ? 0.0 : J);
+}
+
+void step(hls::stream<pair> &A, hls::stream<pair> &B) {
+#pragma HLS INTERFACE s_axilite port=return bundle=CTRL
+#pragma HLS INTERFACE axis port=A,B
+	pair tmp;
+	double *val_a;
+	double *val_b;
+	do {
+		tmp = A.read();
+		val_a = (double *)&tmp.data;
+		val_b = ((double *)&tmp.data) + 1;
+
+		auto s = _step(*val_a, *val_b);
+		*val_a = s;
+		*val_b = 0.0;
+
+		B.write(tmp);
+	} while (not tmp.last);
+}
+
+#endif
+
+void nengofpga(hls::stream<pkt<4>> &A, hls::stream<pkt<4>> &B) {
+#pragma HLS INTERFACE s_axilite port=return bundle=CTRL
+#pragma HLS INTERFACE axis port=A,B
+
+	pkt<4> tmp;
+	uint64_t *val_a;
+	double *val_b;
+	double *val_c;
+
+	std::pair<double, double> a;
+	double b;
+
+	do {
+		tmp = A.read();
+
+		val_a = (uint64_t *)&tmp.data;
+		val_b = ((double *)&tmp.data) + 1;
+		val_c = ((double *)&tmp.data) + 2;
+
+		switch (*val_a) {
+		case 0:
+			a = _gain_bias(*val_b, *val_c);
+			*val_b = a.first;
+			*val_c = a.second;
+			break;
+		case 1:
+			a = _max_rates_intercepts(*val_b, *val_c);
+			*val_b = a.first;
+			*val_c = a.second;
+			break;
+		case 2:
+			b = _step(*val_b, *val_c);
+			*val_b = b;
+			*val_c = 0.0;
+			break;
+		default:
+			break;
+		}
+
+		B.write(tmp);
+	} while (not tmp.last);
+}

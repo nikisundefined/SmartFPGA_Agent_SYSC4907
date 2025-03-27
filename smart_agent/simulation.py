@@ -54,7 +54,7 @@ class Point:
     
     # Add 'Point'-like objects to this point object
     def __add__(self, other: Union['Point', 'Direction', 'Player']) -> 'Point':
-        if other is Direction:
+        if type(other) is Direction:
             return self + other.topoint()
         return Point(self.x + other.x, self.y + other.y)
 
@@ -356,15 +356,14 @@ class Arena:
     # Returns a random point on the grid that is empty
     def _random_tile(self) -> Point:
         tmp = Point(np.random.randint(0, self.n), np.random.randint(0, self.m))
-        while self._tile(tmp) == self.WALL:
+        while self._tile(tmp) != self.EMPTY:
             tmp.x = np.random.randint(0, self.n)
             tmp.y = np.random.randint(0, self.m)
         return tmp
 
-
     # Polymorphic method to access _tile_pnt and _tile_pos
     def _tile(self, *args, **kwargs) -> int:
-        if type(args[0]) == int:
+        if type(args[0]) is int:
             return self._tile_pos(args[0], args[1])
         elif 'x' in kwargs and 'y' in kwargs:
             return self._tile_pos(kwargs['x'], kwargs['y'])
@@ -388,6 +387,12 @@ class Arena:
     
     # Returns the best direction to go if starting at start and going to end
     def best_direction(self, start: Point | None = None, end: Point | None = None) -> Direction:
+        DIRECTION_MAP: dict[Direction, Direction] = {
+            Direction.UP: Direction.DOWN,
+            Direction.DOWN: Direction.UP,
+            Direction.LEFT: Direction.RIGHT,
+            Direction.RIGHT: Direction.LEFT
+        }
         # Set defaults for start and end
         if start is None:
             start = self.player.point
@@ -398,7 +403,6 @@ class Arena:
         # Compute the best direction based on the best path
         delta_dist: Point = path[1] - start
         return Point(np.sign(-delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
-    
     
     def move(self, dir: Direction) -> None:
         """Moves the player in the direction given"""
@@ -446,11 +450,10 @@ class Arena:
             self.grid[self.goal.y][self.goal.x] = self.EMPTY
 
         # Keep generating random locations for the goal while they are not walls
-        tmp: Point = Point(0, 0)
+        tmp: Point = self._random_tile()
         # Special condition: 2 tile cannot be reached an must be manually excluded
-        while self._tile(tmp) == self.WALL or (tmp.x == 11 and (tmp.y == 5 or tmp.y == 17)):
-            tmp.x = np.random.randint(0, 23)
-            tmp.y = np.random.randint(1, 22)
+        while (tmp.x == 11 and (tmp.y == 5 or tmp.y == 17)):
+            tmp = self._random_tile()
         self.goal = tmp
         self.grid[self.goal.y][self.goal.x] = self.GOAL
     
@@ -603,16 +606,23 @@ class PlayerInfo:
 ### performance metrics class ###
 class Performance:
     def __init__(self):
-        self.player_info: dict[Point, PlayerInfo] = {}
+        self.player_info: dict[Point, Union[PlayerInfo, list[PlayerInfo]]] = {}
         self.avg_time: float = 0.0
         self.avg_reward: float = 0.0
         self.avg_actions: float = 0.0
         self.goal_locations: list[Point] = []
 
     def add_player_run_info(self, player: Player) -> None:
-        self.player_info[player.point] = player.info.copy() 
+        if player.point in self.player_info:
+            if type(self.player_info[player.point]) is not list:
+                self.player_info[player.point] = [self.player_info[player.point]]
+            self.player_info[player.point].append(player.info.copy())
+        else:
+            self.player_info[Point.copy(player.point)] = player.info.copy() 
         self.goal_locations.append(player.point.copy())
         self.compute_avg()
+        if len(self.player_info) != len(self.goal_locations):
+            raise RuntimeError("Failed to add player info to performance object")
     
     def compute_avg(self) -> None:
         time = 0
@@ -639,7 +649,7 @@ class Performance:
     
     def __json__(self) -> dict:
         return {
-            'player_info': {str(k): v.__json__() for k, v in self.player_info.items()},
+            'player_info': {str(k): v.__json__() if type(v) is list else [x.__json__() for x in v] for k, v in self.player_info.items()},
             'avg_time': self.avg_time,
             'avg_actions': self.avg_actions,
             'avg_reward': self.avg_reward,

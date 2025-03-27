@@ -7,6 +7,7 @@ import numpy as np
 import pathlib
 import smart_agent.simulation as simulation
 from dataclasses import dataclass, asdict
+import nengopy.neurons
 
 Arena = simulation.Arena
 Direction = simulation.Direction
@@ -57,7 +58,7 @@ class DefaultConsoleDict:
     # The adaptive factor used with the Adaptive LIF neuron type
     tau_n: float = 0.01
     # Neuron type used in all ensembles
-    neuron_type: nengo.neurons.NeuronType = nengo.neurons.LIF()
+    neuron_type: nengo.neurons.NeuronType = nengopy.neurons.RectifiedLinear()
     # Solver type used for learning connections
     solver_type: nengo.solvers.Solver = nengo.solvers.LstsqL2(weights=True)
     # Learning rule used for learning connections
