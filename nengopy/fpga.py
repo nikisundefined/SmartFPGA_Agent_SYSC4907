@@ -1,7 +1,7 @@
-import struct
 import os.path
 import multiprocessing
-from typing import Optional
+import inspect
+import time
 
 import numpy as np
 from pynq import DefaultIP
@@ -10,6 +10,9 @@ from pynq import allocate
 from pynq import PL
 from pynq.buffer import PynqBuffer
 from pynq.lib.dma import DMA
+
+import nengo
+import nengo.neurons
 
 # Notes:
 #   DMA channel seems to fail if any transfer fails 
@@ -38,24 +41,37 @@ class RectifiedLinearFPGA:
         self.dma = dma
         self.buffer: PynqBuffer = None
 
-    def _allocate(self, elems) -> None:
+    def _allocate(self, elems: int) -> None:
         with RectifiedLinearFPGA.lock:
             if self.buffer is not None:
                 del self.buffer
             self.buffer = allocate(shape=(elems, 4), dtype=np.float64)
     
-    def _load_buffer(self, function: int, arg0: np.ndarray, arg1: Optional[np.ndarray] = None, arg2: Optional[np.ndarray] = None) -> None:
-        # Ensure there is enough space in the buffer
-        if self.buffer is None or arg0.size < self.buffer.shape[0]:
-            self._allocate(arg0.size)
-        # Copy elements into the buffer
+    def _load_buffer(self, function: int, arg0, arg1 = None, arg2 = None) -> None:
+        def to_array(x):
+            """Convert int, float, or np.ndarray to a numpy array."""
+            if isinstance(x, (int, float)):
+                return np.array([x], dtype=np.float64)
+            elif isinstance(x, np.ndarray):
+                return x.ravel()
+            else:
+                raise TypeError(f"Invalid type {type(x)} for buffer input")
+
+        arg0 = to_array(arg0)
+        arg1 = to_array(arg1) if arg1 is not None else None
+        arg2 = to_array(arg2) if arg2 is not None else None
+
+        # Allocate buffer if not already allocated or not large enough
+        max_size = max(arg0.size, arg1.size if arg1 is not None else 0, arg2.size if arg2 is not None else 0)
+        if self.buffer is None or self.buffer.shape[0] < max_size:
+            self._allocate(max_size)
+
         self.buffer[:, 0] = function
-        self.buffer[:, 1] = arg0.ravel()
-        # Only put arg1 and arg2 if they were specified
+        self.buffer[: arg0.size, 1] = arg0
         if arg1 is not None:
-            self.buffer[:, 2] = arg1.ravel()
+            self.buffer[: arg1.size, 2] = arg1
         if arg2 is not None:
-            self.buffer[:, 3] = arg2.ravel()
+            self.buffer[: arg2.size, 3] = arg2
 
     def _run(self) -> None:
         # Transfer the buffer address to the DMA channels
@@ -63,6 +79,10 @@ class RectifiedLinearFPGA:
         self.dma.sendchannel.transfer(self.buffer)
         # Start the accelerator
         self.ip.write(0x0, 0x1)
+
+        # Wait for both MM2S_DMASR.Idle and S2MM_DMASR.Idle to be 1
+        while not (self.dma.register_map.MM2S_DMASR.Idle and self.dma.register_map.S2MM_DMASR.Idle):
+            time.sleep(0.001)  # Sleep briefly to prevent excessive CPU usage
 
     def gain_bias(self, max_rates: np.ndarray, intercepts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -163,7 +183,7 @@ class RectifiedLinearFPGA:
 
             self._run()
 
-            output[...] = self.buffer[:, 1]
+            output[...] = self.buffer[:output.size, 1].reshape(output.shape)
         
 
 class FPGADriver(DefaultIP):
@@ -175,6 +195,19 @@ class FPGADriver(DefaultIP):
 
     def rectified_linear(self, dma: DMA) -> RectifiedLinearFPGA:
         return RectifiedLinearFPGA(1, self, dma)
+    
+class RectifiedLinear(nengo.neurons.RectifiedLinear):
+    def __init__(self, **kwargs):
+        super().__init__(*kwargs)
+    
+    def gain_bias(self, max_rates, intercepts):
+        return neuron.gain_bias(max_rates, intercepts)
+    
+    def max_rates_intercepts(self, gain, bias):
+        return neuron.max_rates_intercepts(gain, bias)
+    
+    def step(self, dt, J, output):
+        return neuron.step(dt, J, output, amplitude=self.amplitude)
 
 if __name__ == '__main__':
     PL.reset() # Reset any cached versions of the bitstream and hardware info
@@ -195,6 +228,29 @@ if __name__ == '__main__':
     hls_ip: FPGADriver = ol.nengofpga_0
     dma_rw: DMA = ol.ReadWriteDMA
     neuron: RectifiedLinearFPGA = hls_ip.rectified_linear(dma_rw)
+    neuron_type: RectifiedLinear = RectifiedLinear()
+
+    print("Generating Model")
+    with nengo.Network('TestNet') as net:
+        pre = nengo.Ensemble(
+            n_neurons = 400, 
+            dimensions = 4,
+            neuron_type = neuron_type,
+            label='Pre'
+        )
+        post = nengo.Ensemble(
+            n_neurons=400,
+            dimensions=4,
+            neuron_type=neuron_type,
+            label='Post'
+        )
+        nengo.Connection(pre, post)
+
+        print("Preparing Simulator")
+        with nengo.Simulator(net) as sim:
+            print(f"Running sim at: {sim.time}")
+            sim.run(1)
+            time.sleep(5)
 
 
 # PL.reset() # Reset any cached versions of the bitstream and hardware info
