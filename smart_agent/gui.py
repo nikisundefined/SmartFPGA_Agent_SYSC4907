@@ -3,61 +3,69 @@ import dearpygui.dearpygui as dpg
 import time
 import numpy as np
 import logging
-import smart_agent.vars as vars
 import smart_agent
 
 log: logging.Logger = logging.getLogger('smart_agent.gui')
 
-def create_texture(n: int, m: int) -> list[float]:
-    texture_data: list[float] = []
-    for _ in range(0, n * m):
-        texture_data.append(255 / 255)
-        texture_data.append(0)
-        texture_data.append(255 / 255)
-        texture_data.append(255 / 255)
-    return texture_data
+# Gives a block view on the GUI backing texture for the given coordinates
+def block(x: int, y: int, block_size: int = 10) -> np.ndarray:
+    grid: np.ndarray = smart_agent.gvar.arena.grid
+    pass
 
-def fill_tile(grid: np.ndarray, x: int, y: int, color: list[float], block_size: int = 10) -> None:
-    assert len(grid.shape) == 3, "Invalid input shape for fill operation"
-    assert grid.shape[2] == len(color), "Invalid depth for color given"
-    for ox in range(block_size):
-        for oy in range(block_size):
-            grid[y + oy][x + ox] = np.array(color)
+# Updates the backing texture based on the shared arena instance
+def update() -> None:
+    previous_grid: np.ndarray = smart_agent.gvar.previous_grid
+    texture: np.ndarray = smart_agent.gvar.texture
+    grid: np.ndarray = smart_agent.gvar.arena.grid
+    arena: simulation.Arena = smart_agent.gvar.arena
+    block_size: int = smart_agent.gvar.block_size
 
-# Updates the grid text with the current state of the arena
-def update_grid(arena: simulation.Arena | None = None, block_size: int = 10, tag: str | int = 'Environment'):
-    if arena is None:
-        arena = smart_agent.gvar.arena
-    texture_data: list[float] = []
-    PATH_COLOR: list[float] = [255 / 255, 0, 0, 255 / 255] # Color of the path
-    _map: dict[int, list[float]] = {
-        simulation.Arena.EMPTY: [0, 0, 0, 0], # Black
-        simulation.Arena.WALL: [0, 0, 255 / 255, 255 / 255], # Blue
-        simulation.Arena.PLAYER: [255/ 255, 255 / 255, 0, 255/ 255], # Yellow
-        simulation.Arena.GOAL: [0, 255 / 255, 0, 255 / 255], # Green
+    COLOR_MAP = {
+        0: np.array([0, 0, 0], dtype=np.float32),       # Empty (Black)
+        1: np.array([0, 0, 1], dtype=np.float32),       # Wall (Blue)
+        2: np.array([1, 1, 0], dtype=np.float32),       # Player (Yellow)
+        3: np.array([0, 1, 0], dtype=np.float32),       # Goal (Green)
+        'path': np.array([1, 0, 0], dtype=np.float32)   # Path (Red)
     }
+    
+    height, width = grid.shape
+    path = arena.distance()  # Get the computed path
 
-    path = arena.distance()
-    for y in range(arena.m): # Every Y coordinate
-        for oy in range(block_size): # Every Y block
-            for x in range(arena.n): # Every X coordinate
-                for ox in range(block_size): # Every X block
-                    if simulation.Point(x, y) in path and arena.grid[y][x] == simulation.Arena.EMPTY and (ox > 2 and ox < 8) and (oy > 2 and oy < 8):
-                        texture_data.extend(PATH_COLOR)
+    # Initialize previous_grid if it's the first update
+    if previous_grid is None:
+        previous_grid = np.copy(grid)  # Store a copy of the grid initially
+
+    # Iterate through the grid and update the corresponding texture region
+    for y in range(height):
+        for x in range(width):
+            point = simulation.Point(x, y)
+
+            # Check if the grid cell has changed
+            # if grid[y, x] != previous_grid[y, x] or point in path or previous_grid[y, x] == simulation.Arena.PLAYER:
+            color = COLOR_MAP.get(int(grid[y, x]), COLOR_MAP[0])  # Default to black if unknown
+
+            # Assign the color to the corresponding block in the texture
+            for oy in range(block_size):
+                for ox in range(block_size):
+                    if point in path and grid[y, x] == 0 and (2 < ox < 8) and (2 < oy < 8):
+                        texture[y * block_size + oy, x * block_size + ox] = COLOR_MAP['path']
                     else:
-                        # RGBA pixel format
-                        texture_data.extend(_map[arena.grid[y][x]]) # Pixel value
-    dpg.set_value(item=tag, value=texture_data)
+                        texture[y * block_size + oy, x * block_size + ox] = color
+                            
+    # Update previous_grid for the next call
+    previous_grid = np.copy(grid)
 
 def move(sender, app_data, user_data: simulation.Direction):
-    arena = vars.cvar.arena
+    arena = smart_agent.cvar.arena
+    old = arena.player.point.copy()
 
     arena.move(simulation.Direction(user_data))
     if arena.on_goal():
         arena.set_goal()
         dpg.set_value('score', f'Score: {arena.player.score}')
-    update_grid(arena)
+    update()
     try:
+        print(f'Current: {arena.player} [{arena.grid[arena.player.y, arena.player.x]}]\nOld: {old} [{arena.grid[old.y, old.x]}]')
         print(arena.detection())
     except:
         print(f"DEBUG: {arena.player}")
@@ -82,10 +90,9 @@ def create_gui(arena: simulation.Arena | None = None, block_size: int = 10):
     dpg.setup_dearpygui()
 
     # Create the grid texture and update it based on the arena state
-    arena_texture: list[float] = create_texture(texture_width, texture_height)
     with dpg.texture_registry(show=False):
-        dpg.add_dynamic_texture(width=texture_width, height=texture_height, default_value=arena_texture, tag='Environment')
-    update_grid(arena)
+        dpg.add_raw_texture(width=texture_width, height=texture_height, default_value=smart_agent.gvar.texture, format=dpg.mvFormat_Float_rgb, tag='Environment')
+    update()
 
     # Add all elements that will be displayed to the GUI
     with dpg.window(tag="Pacman"):
@@ -135,7 +142,7 @@ if __name__ == "__main__":
     block_size = 10 # 10px * 10px
     rows = 23
     columns = 23
-    arena: simulation.Arena = simulation.Arena()
+    arena: simulation.Arena = smart_agent.cvar.arena
     width = columns * block_size
     height = rows * block_size
 

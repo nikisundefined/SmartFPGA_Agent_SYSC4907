@@ -16,6 +16,8 @@ Point = simulation.Point
 Direction = simulation.Direction
 PathCache = simulation.PathCache
 PathPair = simulation.PathPair
+PlayerInfo = simulation.PlayerInfo
+Performance = simulation.Performance 
 
 """Shared Implementaion and Proxy classes for the variable storage classes defined in vars.py and simulation.py"""
 
@@ -298,6 +300,49 @@ class SharedPathCache(PathCache):
     def __setitem__(self, pair, path):
         raise RuntimeError(f"SharedPathCache is immutable")
 
+class SharedPlayerInfo(PlayerInfo):
+    size: int = ctypes.sizeof(ctypes.c_uint32) * 2 + ctypes.sizeof(ctypes.c_double)
+
+    def __init__(self, buf: memoryview):
+        self._buf: memoryview = buf
+        self._actions: ctypes.c_uint32 = ctypes.c_uint32.from_buffer(buf[:4])
+        self._time: ctypes.c_uint32 = ctypes.c_uint32.from_buffer(buf[4:8])
+        self._reward: ctypes.c_double = ctypes.c_double.from_buffer(buf[8:])
+    
+    def copy(self, buf: memoryview) -> 'SharedPlayerInfo':
+        tmp = SharedPlayerInfo(buf)
+        tmp.actions = self.actions
+        tmp._time = self._time
+        tmp._reward = self._reward
+        return tmp
+    
+    def clone(self) -> 'SharedPlayerInfo':
+        return SharedPlayerInfo(self._buf)
+    
+    @property
+    def actions(self) -> int:
+        return self._actions.value
+    
+    @actions.setter
+    def actions(self, other: int) -> None:
+        self._actions.value = other
+
+    @property
+    def time(self) -> int:
+        return self._time.value
+    
+    @time.setter
+    def time(self, other: int) -> None:
+        self._time.value = other
+
+    @property
+    def reward(self) -> float:
+        return self._reward.value
+    
+    @reward.setter
+    def reward(self, other: float) -> float:
+        self._reward.value = other
+
 class SharedPlayer(Player):
     size: int = ctypes.sizeof(ctypes.c_uint32) + SharedPoint.size
 
@@ -312,9 +357,10 @@ class SharedPlayer(Player):
         if isinstance(buf, SharedPlayer):
             buf = buf._buf
         self._buf: memoryview = buf
-        self._score: ctypes.c_uint32 = ctypes.c_uint32.from_buffer(buf[:4])
-        self.point: SharedPoint = SharedPoint(buf[4:])
+        self._score: ctypes.c_uint32 = ctypes.c_uint32.from_buffer(buf[:ctypes.sizeof(ctypes.c_uint32)])
+        self.point: SharedPoint = SharedPoint(buf[ctypes.sizeof(ctypes.c_uint32):ctypes.sizeof(ctypes.c_uint32) + SharedPoint.size])
         self.positions: list[Point] = []
+        self.info: PlayerInfo = PlayerInfo(0, 0, 0)
     
     def copy(self) -> 'SharedPlayer':
         tmp = SharedPlayer.fromsharedpoint(self.point)
@@ -362,6 +408,8 @@ class SharedArena(Arena):
         grid: np.ndarray = Arena._create_grid()
         self.grid: np.ndarray = np.ndarray(grid.shape, dtype=grid.dtype, buffer=self.buf[offset:offset+grid.nbytes])
         self.grid[:] = grid[:]
+
+        self.performance = Performance()
     
     def distance(self, start: Point | None = None, end: Point | None = None) -> list[Point] | None:
         global log
@@ -372,17 +420,31 @@ class SharedArena(Arena):
             end = self.goal
 
         pathKey: PathPair = PathPair(start, end)
+        pathKeyReverse: PathPair = PathPair(end, start)
         assert start is not None and end is not None and pathKey is not None
+        # Check both the forward and backward paths, since lookups are cheaper than computation
         if pathKey in SharedArena.shared_path_cache:
             return SharedArena.shared_path_cache[pathKey]
+        elif pathKeyReverse in SharedArena.shared_path_cache:
+            return list(reversed(SharedArena.shared_path_cache[pathKeyReverse]))
         with Arena.path_cache_lock:
             if pathKey in Arena.path_cache:
                 return Arena.path_cache[pathKey]
+            elif pathKeyReverse in Arena.path_cache:
+                return list(reversed(Arena.path_cache[pathKeyReverse]))
         log.warning(f'Entry not found in path cache: {pathKey}')
         tmp = self._distance(start, end)
-        # Update the path cache
-        Arena.path_cache[pathKey] = tmp
-        log.debug(f'Computed path from {start} to {end} as: {tmp}')
+        # If there is a valid path between the start and end points
+        if tmp is not None:
+            count: int = 0
+            # Go over every sub-path in the orignal path and add them all to the cache
+            for point in tmp:
+                key: PathPair = PathPair(point, end)
+                Arena.path_cache[key] = tmp[count:]
+                count += 1
+        else: # There is not viable path, update the cache with None value
+            Arena.path_cache[pathKey] = tmp
+        log.debug(f'Computed {len(tmp)} paths from {start} to {end} as: {tmp}')
         return tmp
 
 # Helper function to copy the default value from a dataclass and convert the internal field into a shared varient

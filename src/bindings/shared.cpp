@@ -10,6 +10,7 @@ PYBIND11_MODULE(sharedcpp, share) {
     auto simulation = pybind11::module_::import("simulationcpp");
 
     auto shared_point = pybind11::class_<shared::SharedPoint<>>(share, "SharedPoint")
+    .def_readonly_static("size", &shared::SHARED_POINT_SIZE)
     .def(pybind11::init([](const pybind11::buffer &buf) -> shared::SharedPoint<> {
         const auto buf_info = buf.request();
         assert(buf_info.size >= shared::SHARED_POINT_SIZE);
@@ -108,6 +109,7 @@ PYBIND11_MODULE(sharedcpp, share) {
     .def("__len__", &shared::SharedPathCache<>::size);
 
     auto shared_player = pybind11::class_<shared::SharedPlayer<>>(share, "SharedPlayer")
+    .def_readonly_static("size", &shared::SHARED_PLAYER_SIZE)
     .def(pybind11::init([](const pybind11::buffer &buf) -> shared::SharedPlayer<> {
         const auto buf_info = buf.request();
         assert(buf_info.size >= shared::SHARED_PLAYER_SIZE);
@@ -143,6 +145,7 @@ PYBIND11_MODULE(sharedcpp, share) {
     .def_property("positions", &shared::SharedPlayer<>::getPositions, &shared::SharedPlayer<>::setPositions);
 
     auto shared_arena = pybind11::class_<shared::SharedArena>(share, "SharedArena")
+    .def_readonly_static("size", &shared::SHARED_ARENA_SIZE)
     .def(pybind11::init([](const pybind11::buffer &buf) -> shared::SharedArena {
         const auto buf_info = buf.request();
         assert(buf_info.size >= shared::SHARED_ARENA_SIZE);

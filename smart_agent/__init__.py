@@ -1,17 +1,19 @@
 from . import vars
 from . import shared
 from . import simulation
-from . import gui
 
 import logging
 import sys
 import threading
+import time
 
 ### Global initialization
 log: logging.Logger = logging.getLogger('smart_agent')
 handle = logging.StreamHandler(sys.stdout)
 handle.setFormatter(logging.Formatter(f'{threading.current_thread().name}[{{name}}] | {{levelname}} -> {{message}}', style='{'))
 log.addHandler(handle)
+
+start_time: float = time.time()
 
 if 'svar' not in globals():
     svar: vars.SharedDict = vars.SharedDict()
@@ -40,3 +42,6 @@ if 'gvar' not in globals():
         tmp: memoryview = shared.create_shared_memory(shared.SharedGUIDict.size, svar.gvars_name)
     gvar: vars.GUIDict = shared.SharedGUIDict(tmp)
     gvar.arena = cvar.arena
+
+end_time: float = time.time()
+log.debug(f'smart_agent load complete, took: {round(end_time-start_time,2)}s')

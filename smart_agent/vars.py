@@ -7,7 +7,6 @@ import numpy as np
 import pathlib
 import smart_agent.simulation as simulation
 from dataclasses import dataclass, asdict
-#import nengopy.neurons as nengopy
 
 Arena = simulation.Arena
 Direction = simulation.Direction
@@ -16,8 +15,8 @@ log: logging.Logger = logging.getLogger('smart_agent.vars')
 
 # Default json encoder for custom object serialization
 class JsonEncoder(json.JSONEncoder):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def default(self, o):
         try:
@@ -93,6 +92,10 @@ class DefaultConsoleDict:
     reward_reset: bool = False
     # Is the model still learning
     learning: bool = True
+    # Path to file to dump metrics
+    metrics_file: pathlib.Path = pathlib.Path(__file__).parent.parent / 'metrics.json'
+    # Should the path cache be loaded
+    load_path_cache: bool = False
 
 # Access classs for Console Variables with local storage
 class ConsoleDict:
@@ -119,6 +122,8 @@ class SharedDict:
 # Store variables related to the GUI implementation that should be shared between all GUI implementations
 @dataclass(frozen=True)
 class DefaultGUIDict:
+    # Disable local GUI
+    disable_gui: bool = False
     # The arena the GUI representation should be based from
     arena: Arena = None
     # Is the local gui running
@@ -137,6 +142,12 @@ class DefaultGUIDict:
     offset_time: float = 0.0
     # The current simulator time
     sim_time: float = 0.0
+    # The texture backing the local GUI
+    texture: np.ndarray = np.zeros(shape=(23 * 10, 23 * 10, 3), dtype=np.float32)
+    # A copy of the previous state of the grid for delta generation
+    previous_grid: np.ndarray = None
+    # Size of each block in the texture
+    block_size: int = 10
 
 # Stores all variables related to the local and nengo gui representation
 class GUIDict:

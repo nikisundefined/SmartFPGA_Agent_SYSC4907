@@ -11,11 +11,12 @@
 #include "../pathfinding.h"
 
 PYBIND11_MODULE(simulationcpp, sim) {
-    auto direction = pybind11::enum_<simulation::Direction>(sim, "Direction")
+    auto direction = pybind11::enum_<simulation::Direction>(sim, "Direction", pybind11::module_local())
     .value("UP", simulation::Direction::Up)
     .value("DOWN", simulation::Direction::Down)
     .value("LEFT", simulation::Direction::Left)
     .value("RIGHT", simulation::Direction::Right)
+    .value("NONE", simulation::Direction::None)
     .export_values();
 
     auto point = pybind11::class_<simulation::Point<>>(sim, "Point")

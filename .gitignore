@@ -9,3 +9,4 @@ arena.png
 .venv
 path_cache.json
 build
+metrics.json
