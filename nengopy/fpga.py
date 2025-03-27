@@ -3,6 +3,7 @@ import multiprocessing
 import time
 import logging
 import fcntl
+import atexit
 
 import numpy as np
 from pynq import DefaultIP
@@ -224,6 +225,7 @@ def aquire_lock() -> bool:
     try:
         fd = open(LOCK_FILE, 'w')
         fcntl.flock(fd, fcntl.LOCK_NB | fcntl.LOCK_EX)
+        atexit.register(lambda: os.remove(LOCK_FILE))
         return True
     except (OSError, IOError):
         if fd: os.close(fd)
@@ -236,27 +238,6 @@ hls_ip: FPGADriver = ol.nengofpga_0
 dma_rw: DMA = ol.ReadWriteDMA
 neuron: RectifiedLinearFPGA = hls_ip.rectified_linear(dma_rw)
 neuron_type: RectifiedLinear = RectifiedLinear()
-
-if __name__ == '__main__':
-    PL.reset() # Reset any cached versions of the bitstream and hardware info
-    
-    log.info("Programming the FPGA")
-    # print("Path to bitstream")
-    # tmp: str = input(f'[{bitstream_path}]: ')
-    # if len(tmp) != 0: bitstream_path = tmp
-    # if not bitstream_path.endswith('.bit'):
-    #     raise ValueError('Not a bitstream file')
-    # if not os.path.exists(bitstream_path):
-    #     raise FileNotFoundError(f'Bitstream file {bitstream_path} does not exist')
-    ol = Overlay(bitstream_path)
-    log.info("FPGA programmed")
-
-    if 'nengofpga_0' not in ol.ip_dict.keys() or 'ReadWriteDMA' not in ol.ip_dict.keys():
-        raise RuntimeError('NengoFPGA or DMA not found')
-    hls_ip: FPGADriver = ol.nengofpga_0
-    dma_rw: DMA = ol.ReadWriteDMA
-    neuron: RectifiedLinearFPGA = hls_ip.rectified_linear(dma_rw)
-    neuron_type: RectifiedLinear = RectifiedLinear()
 
 if __name__ == '__main__':
     print("Generating Model")
