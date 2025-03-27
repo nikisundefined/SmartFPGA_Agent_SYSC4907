@@ -235,11 +235,11 @@ class RectifiedLinear(nengo.neurons.RectifiedLinear):
     def step(self, dt, J, output):
         tmp_output = np.array(output, ndmin=1, copy=True, dtype=np.float64)
 
-        expected_output = super().step(dt, J, tmp_output)
-        calculated_output = neuron.step(dt, J, output, amplitude=self.amplitude)
+        super().step(dt, J, tmp_output)
+        neuron.step(dt, J, output, amplitude=self.amplitude)
 
         # Ensure element-wise comparison of numpy arrays inside tuples
-        if not all(np.allclose(e, c) for e, c in zip(expected_output, calculated_output)):
+        if not np.allclose(tmp_output, output):
             print("FPGA returned the wrong output")
             output[...] = tmp_output  # Copy correct values to output
 
