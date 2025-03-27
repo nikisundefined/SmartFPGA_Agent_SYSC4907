@@ -9,6 +9,7 @@ import pathlib
 import json
 from typing import Union
 from enum import IntEnum
+import pandas as pd
 
 log: logging.Logger = logging.getLogger('smart_agent.simulation')
 
@@ -278,7 +279,6 @@ class Arena:
     WALL = 1
     PLAYER = 2
     GOAL = 3
-
     _player_start: Point = Point(3,3) # Initial starting point for the player
     _goal_start: Point = Point(11, 9) # Initial starting point for the goal
     path_cache: PathCache = PathCache()
@@ -397,7 +397,8 @@ class Arena:
         path: list[Point] = self.distance(start, end)
         # Compute the best direction based on the best path
         delta_dist: Point = path[1] - start
-        return Point(np.sign(delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
+        return Point(np.sign(-delta_dist.x), 0).asdirection() if abs(delta_dist.x) == self.n - 1 else delta_dist.asdirection()
+    
     
     def move(self, dir: Direction) -> None:
         """Moves the player in the direction given"""

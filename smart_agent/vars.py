@@ -53,7 +53,7 @@ class DefaultConsoleDict:
     # The number of neurons per ensemble
     ensemble_neurons: int = 400
     # Learning rate of the learning rule
-    learning_rate: float = 5e-5
+    learning_rate: float = 5e-4
     # The adaptive factor used with the Adaptive LIF neuron type
     tau_n: float = 0.01
     # Neuron type used in all ensembles

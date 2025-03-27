@@ -38,7 +38,7 @@ Arena = simulation.Arena
 PathCache = simulation.PathCache
 
 # Learning Inhibit Vars
-LEARN_STOP_TIME: float = 240.0
+LEARN_STOP_TIME: float = 600.0
 LEARN_MEASURE_TIME: float = LEARN_STOP_TIME * 1.25
 
 # Setup the variables for the model
@@ -206,7 +206,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
         # Error is the baseline value scaled by the inverse of the reward in the best direction
         err: np.ndarray = x # Set the error to the post to reset all values other than the best direction
         # New error scaling equation
-        # f(x) = {
+        #f(x) = {
         #   E / x + 0.0.1; x >= 50
         #   sqrt(-(x - 50)) / 8 + 0.25; 1 <= x < 50
         #}
@@ -215,7 +215,7 @@ def error(t: float, x: np.ndarray, cvar: AttrDict = cvar) -> np.ndarray:
             err_scale: float = ERROR_CURVE / cvar.reward + 0.01
         else:
             err_scale: float = math.sqrt(-(cvar.reward - 50)) / 8 + 0.25
-        # err_scale: float = (ERROR_CURVE / cvar.reward) # Factor to scale error by
+        #err_scale: float = (ERROR_CURVE / cvar.reward) # Factor to scale error by
         err_val: float = (x[best_direction] - BASELINE_ERROR) * err_scale  # Compute the error value for the best direction
         # Set the direction we want to go in to the computed error value
         err[best_direction] = err_val
@@ -315,7 +315,7 @@ def detection(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     # Get the detection information from the arena
     tmp = cvar.arena.detection().astype(cvar.dtype)
     # Convert the detection distance to a binary value base on if there is or is not a wall in a direction
-    return (tmp / 23.0)
+    return (tmp / 46.0)
 
 def inhibit(t: float, cvar: AttrDict = cvar) -> np.ndarray:
     if cvar.learning:
@@ -356,31 +356,31 @@ def create_model_fpga():
             size_out=cvar.input_dimensions,
             label='Distance Input Node'
         )
-        g_dist = nengo.Node(
-            output=goal_path_distance,
-            size_out=1,
-            label='Goal Path Distance'
-        )
+        #g_dist = nengo.Node(
+        #    output=goal_path_distance,
+        #    size_out=1,
+        #    label='Goal Path Distance'
+        #)
         best_dir = nengo.Node(
             output=goal_best_direction,
             size_out=cvar.input_dimensions,
             label='Goal Best Direction'
         )
-        g_pnt = nengo.Node(
-            output=goal_point_distance,
-            size_out=2,
-            label='Goal Point Distance'
-        )
-        p_loc = nengo.Node(
-            output=player_location,
-            size_out=2,
-            label='Player Location'
-        )
-        g_loc = nengo.Node(
-            output=goal_location,
-            size_out=2,
-            label='Goal Location'
-        )
+        #g_pnt = nengo.Node(
+        #    output=goal_point_distance,
+        #    size_out=2,
+        #    label='Goal Point Distance'
+        #)
+        #p_loc = nengo.Node(
+        #    output=player_location,
+        #    size_out=2,
+        #    label='Player Location'
+        #)
+        #g_loc = nengo.Node(
+        #    output=goal_location,
+        #    size_out=2,
+        #    label='Goal Location'
+        #)
         learn_inhibit = nengo.Node(
             output=inhibit,
             size_out=cvar.ensemble_neurons,
@@ -401,19 +401,19 @@ def create_model_fpga():
             label='Error Compute',
         )
         # Node to be able to view reward in nengo gui
-        nreward = nengo.Node(
-            output=lambda x: cvar.reward,
-            size_out=1,
-            label='Reward'
-        )
+        #nreward = nengo.Node(
+        #    output=lambda x: cvar.reward,
+        #    size_out=1,
+        #    label='Reward'
+        #)
 
         # Ensembles
-        err = nengo.Ensemble(
-            n_neurons=cvar.ensemble_neurons,
-            dimensions=cvar.output_dimensions,
-            neuron_type=cvar.neuron_type,
-            label='Error',
-        )
+        #err = nengo.Ensemble(
+        #    n_neurons=cvar.ensemble_neurons,
+        #    dimensions=cvar.output_dimensions,
+        #    neuron_type=cvar.neuron_type,
+        #    label='Error',
+        #)
 
         # Input Connections
         conn_dist_in = nengo.Connection(
@@ -544,7 +544,7 @@ if __name__ == '__main__':
             # Start the nengo web gui in the main thread
             g = nengo_gui.InteractiveGUI(
                 nengo_gui.guibackend.ModelContext(filename=__file__), 
-                nengo_gui.guibackend.GuiServerSettings(('0.0.0.0', 8080)),
+                nengo_gui.guibackend.GuiServerSettings(('localhost', 8080)),
                 nengo_gui.page.PageSettings()
             )
             webbrowser.open(str(g.server.get_url(token="one-time")))
