@@ -64,7 +64,8 @@ void max_rates_intercepts(hls::stream<pair> &A, hls::stream<pair> &B) {
 #ifdef ENABLE_STEP
 
 double _step(const double &amplitude, const double &J) {
-	return amplitude * (J < 0 ? 0.0 : J);
+	if (J < 0.0) return 0.0;
+	return amplitude * J;
 }
 
 void step(hls::stream<pair> &A, hls::stream<pair> &B) {
