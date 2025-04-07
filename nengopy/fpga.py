@@ -1,4 +1,5 @@
-import os.path
+import os
+import pathlib
 import multiprocessing
 import time
 import logging
@@ -232,7 +233,7 @@ def aquire_lock() -> bool:
         return False
 
 download: bool = aquire_lock()
-bitstream_path: str = '/home/xilinx/nengofpga/nengofpga.bit'
+bitstream_path: str = str(pathlib.Path(__file__).parent.parent / 'nengofpga' / 'nengofpga.bit')
 ol = Overlay(bitstream_path, download=download)
 hls_ip: FPGADriver = ol.nengofpga_0
 dma_rw: DMA = ol.ReadWriteDMA
