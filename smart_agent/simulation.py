@@ -439,7 +439,6 @@ class Arena:
             self.grid[self.player.y][self.player.x] = self.PLAYER
             self.player.collect_goal()
             self.performance.add_player_run_info(self.player)
-            self.player.info.reset()
         else:
             self.grid[self.goal.y][self.goal.x] = self.EMPTY
 
@@ -600,41 +599,36 @@ class PlayerInfo:
 ### performance metrics class ###
 class Performance:
     def __init__(self):
-        self.player_info: dict[Point, Union[PlayerInfo, list[PlayerInfo]]] = {}
+        self.player_info: dict[Point, list[PlayerInfo]] = {}
         self.avg_time: float = 0.0
         self.avg_reward: float = 0.0
         self.avg_actions: float = 0.0
         self.goal_locations: list[Point] = []
 
     def add_player_run_info(self, player: Player) -> None:
+        # Check if the player's location is already in the dictionary
         if player.point in self.player_info:
-            if type(self.player_info[player.point]) is not list:
-                self.player_info[player.point] = [self.player_info[player.point]]
+            # Add the current player info to the list
             self.player_info[player.point].append(player.info.copy())
+        # If the player's location doesn't exist, add it to the dictionary
         else:
-            self.player_info[Point.copy(player.point)] = player.info.copy() 
-        self.goal_locations.append(player.point.copy())
+            self.player_info[player.point] = [player.info.copy()]
+        self.goal_locations.append(player.point)
         self.compute_avg()
-        if len(self.player_info) != len(self.goal_locations):
-            raise RuntimeError("Failed to add player info to performance object")
     
     def compute_avg(self) -> None:
-        time = 0
-        reward = 0
-        action = 0
-        for _, player in self.player_info.items():
-            if type(player) is PlayerInfo:
-                time += reduce(lambda x, y: x+y.time, player, 0)
-                action += reduce(lambda x, y: x+y.actions, player, 0)
-                reward += reduce(lambda x, y: x+y.reward, player, 0)
-            else:
-                time += player.time
-                action += player.actions 
-                reward += player.reward
-        
-        self.avg_time = time / len(self.player_info)
-        self.avg_actions = action / len(self.player_info)
-        self.avg_reward = reward / len(self.player_info)
+        time: int = 0
+        reward: float = 0.0
+        actions: int = 0
+        for info_list in self.player_info.values():
+            for info in info_list:
+                time += info.time
+                reward += info.reward
+                actions += info.actions
+        count: int = sum(len(p) for p in self.player_info.values())
+        self.avg_time = time / count
+        self.avg_reward = reward / count
+        self.avg_actions = actions / count
 
     @property
     def goal_count(self) -> int:
@@ -648,7 +642,7 @@ class Performance:
     
     def __json__(self) -> dict:
         return {
-            'player_info': {str(k): v.__json__() if type(v) is list else [x.__json__() for x in v] for k, v in self.player_info.items()},
+            'player_info': {str(k): [i.__json__() for i in v] for k, v in self.player_info.items()},
             'avg_time': self.avg_time,
             'avg_actions': self.avg_actions,
             'avg_reward': self.avg_reward,

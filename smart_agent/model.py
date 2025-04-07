@@ -544,7 +544,7 @@ if __name__ == '__main__':
             # Start the nengo web gui in the main thread
             g = nengo_gui.InteractiveGUI(
                 nengo_gui.guibackend.ModelContext(filename=__file__), 
-                nengo_gui.guibackend.GuiServerSettings(('localhost', 8080)),
+                nengo_gui.guibackend.GuiServerSettings(('0.0.0.0', 8080)),
                 nengo_gui.page.PageSettings()
             )
             webbrowser.open(str(g.server.get_url(token="one-time")))

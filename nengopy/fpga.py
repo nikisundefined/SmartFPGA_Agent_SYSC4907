@@ -59,7 +59,7 @@ class RectifiedLinearFPGA:
         def to_array(x):
             """Convert int, float, or np.ndarray to a numpy array."""
             if isinstance(x, (int, float)):
-                return np.array([x], dtype=np.float64)
+                return x
             elif isinstance(x, np.ndarray):
                 return x.ravel()
             else:
@@ -70,16 +70,16 @@ class RectifiedLinearFPGA:
         arg2 = to_array(arg2) if arg2 is not None else None
 
         # Allocate buffer if not already allocated or not large enough
-        max_size = max(arg0.size, arg1.size if arg1 is not None else 0, arg2.size if arg2 is not None else 0)
+        max_size = max(arg0.size if type(arg0) is np.ndarray else 1, arg1.size if arg1 is not None else 0, arg2.size if arg2 is not None else 0)
         if self.buffer is None or self.buffer.shape[0] < max_size:
             self._allocate(max_size)
 
         self.buffer[:, 0] = function
-        self.buffer[: arg0.size, 1] = arg0
+        self.buffer[:, 1] = arg0
         if arg1 is not None:
-            self.buffer[: arg1.size, 2] = arg1
+            self.buffer[:arg1.size, 2] = arg1
         if arg2 is not None:
-            self.buffer[: arg2.size, 3] = arg2
+            self.buffer[:arg2.size, 3] = arg2
 
     def _run(self) -> None:
         # Transfer the buffer address to the DMA channels
@@ -191,7 +191,7 @@ class RectifiedLinearFPGA:
 
             self._run()
 
-            output[...] = self.buffer[:output.size, 1].reshape(output.shape)
+            output[:] = self.buffer[:output.size, 2].reshape(output.shape)
         
 
 class FPGADriver(DefaultIP):
@@ -211,37 +211,13 @@ class RectifiedLinear(nengo.neurons.RectifiedLinear):
         super().__init__(*kwargs)
     
     def gain_bias(self, max_rates, intercepts):
-        expected_output = super().gain_bias(max_rates, intercepts)
-        calculated_output = neuron.gain_bias(max_rates, intercepts)
-
-        # Ensure element-wise comparison of numpy arrays inside tuples
-        if all(np.allclose(e, c) for e, c in zip(expected_output, calculated_output)):
-            return calculated_output
-
-        print("FPGA returned the wrong output")
-        return expected_output
+        return neuron.gain_bias(max_rates, intercepts)
     
     def max_rates_intercepts(self, gain, bias):
-        expected_output = super().max_rates_intercepts(gain, bias)
-        calculated_output = neuron.max_rates_intercepts(gain, bias)
-
-        # Ensure element-wise comparison of numpy arrays inside tuples
-        if all(np.allclose(e, c) for e, c in zip(expected_output, calculated_output)):
-            return calculated_output
-
-        print("FPGA returned the wrong output")
-        return expected_output
+        return neuron.max_rates_intercepts(gain, bias)
 
     def step(self, dt, J, output):
-        tmp_output = np.array(output, ndmin=1, copy=True, dtype=np.float64)
-
-        super().step(dt, J, tmp_output)
         neuron.step(dt, J, output, amplitude=self.amplitude)
-
-        # Ensure element-wise comparison of numpy arrays inside tuples
-        if not np.allclose(tmp_output, output):
-            print("FPGA returned the wrong output")
-            output[...] = tmp_output  # Copy correct values to output
 
 # Check if the overlay has already been loaded
 def aquire_lock() -> bool:
