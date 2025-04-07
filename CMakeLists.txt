@@ -28,14 +28,12 @@ FetchContent_Declare(
         FIND_PACKAGE_ARGS
 )
 
-# TODO: find any other options that should be set when using this method of including projects
 set(BUILD_TESTING OFF)
 set(EIGEN_BUILD_TESTING OFF)
 set(EIGEN_MPL2_ONLY ON)
 set(EIGEN_BUILD_PKGCONFIG OFF)
 set(EIGEN_BUILD_DOC OFF)
 
-# TODO: Convert the find_package calls to FetchContent
 find_package(Python 3.10 COMPONENTS Interpreter Development REQUIRED)
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 FetchContent_MakeAvailable(pybind11 nlohmann_json)
