@@ -116,13 +116,18 @@ Error is determined as follows:
 4. The error scaling value is calculated and scales the baseline error
 
 Error Scaling is based on the reward of the agent using the following equation:
-$$
+
+<p align=center>
+  
+$`
 f(x) =
 \begin{cases}
-\frac{E}{Reward} + 0.0.1 & \text{if } x \ge 50 \\
+\frac{12}{Reward} + 0.0.1 & \text{if } x \ge 50 \\
 \frac{\sqrt{-(Reward - 50)}}{8} + 0.25 & \text{if } 1 \le x < 50
 \end{cases}
-$$
+`$
+
+</p>
 
 #### Reward
 The reward for the agent is based on the following actions:
