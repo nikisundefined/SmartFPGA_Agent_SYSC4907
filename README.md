@@ -143,13 +143,33 @@ For more information about how the learning rule works look <a href=https://www.
 The FPGA component is implenented by subclassing nengos <a>`RectifiedLinear`</a> neuron type and is split into 3 sections.
 
 #### Python
-//TODO: Add Python code details here
-
-#### Vivado
-//TODO: Add block design image
+A Python wrapper is included to translate cals for functions from Python into a data structure useable by the HLS ip in the FPGA.
+The wrapper also trnaslates the return value from the FPGA into the expected output of the Python function call.
+More details about the strutcure of the HLS function and its inputs/outputs are given in the following sections.
 
 #### HLS
-//TODO: Add HLS design details here
+The top level function of the IP accepts a 256-bit vector as both an input and output.
+This vector is split into 4 64-bit components:
+1. The ID of the function to call (defined in <a href=src/hls/rectified_linear.cpp#L111>`rectified_linear.cpp`</a>)
+2. The first parameter of the function (converted to double)
+3. The second parameter of the function (converted to double)
+4. The third parameter of the function (converted to double)
+
+The function then calls the appropriate C++ function based on the ID of the function passed in.
+Output products are then written back into the output vector in the same order as the inputs.
+
+#### Vivado
+
+<p align=center>
+<img src=doc/img/block_design.svg></img><br/>
+Image of block design used in Vivado
+</p>
+
+There are 2 main components involved in the block design shown above.
+1. **AXI DMA**: This block reads/writes data from/to memory and passes information to HLS IP as an AXI FIFO stream.
+2. **HLS IP Core**: This core contains the HLS function that was described in the previous section.
+
+An important note about the AXI DMA is that if a channel is busy/waiting for information, the entire channel will be blocked until enough information is passed through the stream. For this reason, it is recommended to only read/write to the same buffer as the input and output sizes are the same, there is no chance for the DMA transfers to stall waiting for read/write capacity. For more information about AXI DMA and other things to watch out for refer to <a href=nengopy/fpga.py#L23>`fpga.py`</a>
 
 ## Installation
 
