@@ -148,8 +148,8 @@ For more information about how the learning rule works look <a href=https://www.
 The FPGA component is implenented by subclassing nengos <a>`RectifiedLinear`</a> neuron type and is split into 3 sections.
 
 #### Python
-A Python wrapper is included to translate cals for functions from Python into a data structure useable by the HLS ip in the FPGA.
-The wrapper also trnaslates the return value from the FPGA into the expected output of the Python function call.
+A Python wrapper is included to translate calls for functions from Python into a data structure useable by the HLS ip in the FPGA.
+The wrapper also translates the return value from the FPGA into the expected output of the Python function call (ex. returning tuples of numpy array).
 More details about the strutcure of the HLS function and its inputs/outputs are given in the following sections.
 
 #### HLS
