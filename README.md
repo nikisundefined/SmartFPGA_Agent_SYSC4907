@@ -24,6 +24,70 @@ An image of the local gui showing the arena the agent traverses
 A image of the nengo gui showing the connections and elements of the neural network
 </p>
 
+## Project Structure
+
+```
+├── build                                                (Build artifacts)
+├── doc
+│   └── img                                                (README images)
+│       ├── block_design.svg
+│       ├── local_gui.png
+│       └── nengo_gui.png
+├── examples                                (Examples of similar projects)
+│   ├── 02-RL-demo.py
+│   ├── 02-RL-demo.py.cfg
+│   └── grid.py
+├── nengofpga                       (Bitstream and Hardware Handoff Files)
+│   ├── nengofpga.bit
+│   ├── nengofpga.hwh
+│   ├── pes_relu_rate.bit
+│   ├── pes_relu_rate.hwh
+│   ├── pes_relu_spiking.bit
+│   └── pes_relu_spiking.hwh
+├── nengopy                                       (FPGA wrapper in python)
+│   ├── fpga.py
+│   ├── __init__.py
+│   ├── nengocpp.pyi
+│   └── neurons.py
+├── smart_agent                                (Simulation and Model Code)
+│   ├── gui.py
+│   ├── __init__.py
+│   ├── model.py
+│   ├── model.py.cfg
+│   ├── shared.py
+│   ├── simulation.py
+│   └── vars.py
+├── src                                                 (C++ Source Files)
+│   ├── bindings                          (Pybind11 bindings for C++ code)
+│   │   ├── nengo.cpp
+│   │   ├── shared.cpp
+│   │   └── simulation.cpp
+│   ├── hls                                                 (HLS C++ Code)
+│   │   ├── bd.tcl
+│   │   ├── rectified_linear.cpp
+│   │   └── rectified_linear.h
+│   ├── arena.h
+│   ├── direction.h
+│   ├── nengo.h
+│   ├── path_cache.h
+│   ├── pathfinding.cpp
+│   ├── pathfinding.h
+│   ├── path_pair.h
+│   ├── player.h
+│   ├── point.h
+│   ├── shared_arena.h
+│   ├── shared_path_cache.h
+│   ├── shared_player.h
+│   └── shared_point.h
+├── apt-packages.txt
+├── CMakeLists.txt
+├── metrics.json
+├── path_cache.json
+├── README.md
+├── requirements.txt
+└── TODO.md
+```
+
 ## How It Works
 ### Simulation
 The simulation is written completely in python and composed of an:
@@ -88,6 +152,18 @@ The FPGA component is implenented by subclassing nengos <a>`RectifiedLinear`</a>
 //TODO: Add HLS design details here
 
 ## Installation
+
+### Requirements
+>This project requires:
+>- python >= 3.10
+>- numpy <= 1.26.2
+>- pynq (if running on FPGA else optional)
+>- nengo
+>- nengo-spa>- nengo
+>- nengo-spa
+>- nengo-gui
+>- nengo-gui
+>- dearpygui (optional, used for local gui)
 
 First clone this repository and navigate to the project directory. Then, create a virtual environment and activate it:
 >If you are running on the PYNQ Linux image you can skip this step.
