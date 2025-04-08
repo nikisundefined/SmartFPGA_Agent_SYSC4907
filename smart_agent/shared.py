@@ -257,7 +257,6 @@ class SharedPathCache(PathCache):
         offset: int = 0
         count: int = 0
         self.paths.clear() # Reset the internal mapping of points
-        # TODO: apparently this method of loading is extremely slow
         tmp = push_log_terminiator()
         for k, v in cache.cache.items():
             nbytes = 0 if v is None else len(v) * SharedPoint.size 

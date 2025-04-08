@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import smart_agent.simulation as simulation
 import dearpygui.dearpygui as dpg
 import time
@@ -6,11 +8,6 @@ import logging
 import smart_agent
 
 log: logging.Logger = logging.getLogger('smart_agent.gui')
-
-# Gives a block view on the GUI backing texture for the given coordinates
-def block(x: int, y: int, block_size: int = 10) -> np.ndarray:
-    grid: np.ndarray = smart_agent.gvar.arena.grid
-    pass
 
 # Updates the backing texture based on the shared arena instance
 def update() -> None:

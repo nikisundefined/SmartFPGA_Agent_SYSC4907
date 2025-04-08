@@ -9,7 +9,6 @@ import pathlib
 import json
 from typing import Union
 from enum import IntEnum
-from functools import reduce
 
 log: logging.Logger = logging.getLogger('smart_agent.simulation')
 
@@ -677,8 +676,6 @@ if __name__ == "__main__":
     import sys
     import os
     import concurrent.futures
-    import threading
-    import pathlib
     import multiprocessing
     n = 23 # X length
     m = 23 # Y length

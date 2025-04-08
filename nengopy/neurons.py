@@ -2,5 +2,5 @@ try:
     from . import fpga
     RectifiedLinear = fpga.RectifiedLinear
 except:
-    import nengo.neurons
+    import nengo
     RectifiedLinear = nengo.RectifiedLinear

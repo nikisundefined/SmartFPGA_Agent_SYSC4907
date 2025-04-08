@@ -11,9 +11,6 @@ log = logging.getLogger('smart_agent.model')
 
 import smart_agent
 import nengo
-import nengo.learning_rules
-import nengo.neurons
-import nengo.solvers
 import nengo_gui
 import nengo_gui.guibackend
 import nengo_gui.page
